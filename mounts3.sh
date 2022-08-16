@@ -51,7 +51,7 @@ for profile in $profiles; do  #itterate through profiles
 		option=" -o use_path_request_style "
 	fi
 	mkdir -p $mountbase/$bucket
-	cmd="/usr/bin/s3fs $option $bucket $mountbase/$bucket -o passwd_file=~/.aws/passwd-s3fs-$profile"
+	cmd="/usr/bin/s3fs -o check_cache_dir_exist  $option $bucket $mountbase/$bucket -o passwd_file=~/.aws/passwd-s3fs-$profile "
 	#echo "$cmd"
 	eval "$cmd" #using eval to create the command in only one place but still show it on the screen
 	mountgrep=`mount | grep "s3fs" | grep "$bucket"`
