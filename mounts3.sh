@@ -35,8 +35,8 @@ mkdir -p $mountbase
 for profile in $profiles; do  #itterate through profiles
     echo "Mounting buckets from $profile:"
     #this is hacky but it works since aws cli doesn't have a way to query the secret key that I could find
-    access_key=`grep -A 5 -m 1 "[$profile]" ~/.aws/credentials | grep -m 1 aws_access_key_id | awk '{split($0,a,"\s*=\s*"); print a[2]}'`
-    secret_key=`grep -A 5 -m 1 "[$profile]" ~/.aws/credentials | grep -m 1 aws_secret_access_key | awk '{split($0,a,"\s*=\s*"); print a[2]}'`
+    access_key=`grep -A 5 -m 1 "[$profile]" ~/.aws/credentials | grep -m 1 aws_access_key_id | awk '{split($0,a,"\s*=\s*"); print a[2]}' | tr -d ' '`
+    secret_key=`grep -A 5 -m 1 "[$profile]" ~/.aws/credentials | grep -m 1 aws_secret_access_key | awk '{split($0,a,"\s*=\s*"); print a[2]}' | tr -d ' '`
     #create the password file for mounting
     echo "$access_key:$secret_key" > ~/.aws/passwd-s3fs-$profile
     /usr/bin/chmod 600 ~/.aws/passwd-s3fs-$profile
