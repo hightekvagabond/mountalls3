@@ -4,6 +4,9 @@
 
 #you also need to have amazon cli installed and your credentials set up
 
+#it was written to run on my kbuntu instances so if you are running it somewhere else you might have to fix some pathing on things.
+
+
 #get a list of profiles
 profiles=$(aws configure list-profiles)
 
@@ -54,18 +57,23 @@ for profile in $profiles; do  #itterate through profiles
 	cmd="/usr/bin/s3fs -o check_cache_dir_exist  $option $bucket $mountbase/$bucket -o passwd_file=~/.aws/passwd-s3fs-$profile "
 	#echo "$cmd"
 	eval "$cmd" #using eval to create the command in only one place but still show it on the screen
-	mountgrep=`mount | grep "s3fs" | grep "$bucket"`
-	#echo "mountgrep: $mountgrep"
-	if [ -z "$mountgrep" ]; then
-		echo "   There seems to have been a problem mounting $bucket to $mountbase/$bucket to troubleshoot run:"
-		echo "          $cmd -f"
-	else
-		echo "   Mounted: $bucket"	
+
+	#check to see if it mounted
+	processing=true
+	while [[ (! ("$(mountpoint $mountbase/$bucket)" == *"is a mountpoint"*)) && "$processing" == true ]]; do
+		echo "$bucket is not a mount point yet"
+		mountgrep=`mount | grep "s3fs" | grep "$bucket"`
+		if [ -z "$mountgrep" ]; then
+			echo "  There seems to have been a problem mounting $bucket to $mountbase/$bucket to troubleshoot run:"
+			echo "    $cmd -f"
+			processing=false
+		else
+			echo "Looks like we are still trying to mount $bucket, waiting 5 seconds"
+			sleep 5
+		fi
+	done
+	if [[ "$processing" == true ]]; then
+		echo "   Mounted: $bucket"   
 	fi
-
-
     done
-
-
 done
-
