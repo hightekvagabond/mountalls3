@@ -61,7 +61,9 @@ for profile in $profiles; do  #itterate through profiles
 	reg='\"LocationConstraint\": \"(.*?)\"'
 	[[ "$locationinfo" =~ $reg ]] 
 	location="${BASH_REMATCH[1]}"
-	option="$option  -o url=https://s3-$location.amazonaws.com "
+	if [[ ! -z $location ]]; then
+		option="$option  -o url=https://s3-$location.amazonaws.com "
+	fi
 
 
 	cmd="/usr/bin/s3fs -o check_cache_dir_exist  $option $bucket $mountbase/$bucket -o passwd_file=~/.aws/passwd-s3fs-$profile "
