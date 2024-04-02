@@ -13,25 +13,29 @@ profiles=$(aws configure list-profiles)
 mountbase="$HOME/s3"
 
 
-#unmount everything to start fresh
-IFS=$'\n' #to split on newline
-for line in $(mount | grep "s3fs");do
-	#example line:  s3fs on /home/gypsy/s3/imaginationguild-devshare type fuse.s3fs (rw,nosuid,nodev,relatime,user_id=1000,group_id=1000)
-	mountpoint="$(cut -d' ' -f3 <<<\"$line\" )"
-	if [[ $line =~ "$mountbase"* ]]; then
-		echo "unmounting $mountpoint"
-		`umount $mountpoint`
-	fi
-done
-unset IFS #reset to default split
+#if the first argument is ummount then we will unmount everything and exit
+if [ "$1" == "unmount" ]; then
+	IFS=$'\n' #to split on newline
+	for line in $(mount | grep "s3fs");do
+		#example line:  s3fs on /home/gypsy/s3/imaginationguild-devshare type fuse.s3fs (rw,nosuid,nodev,relatime,user_id=1000,group_id=1000)
+		mountpoint="$(cut -d' ' -f3 <<<\"$line\" )"
+		if [[ $line =~ "$mountbase"* ]]; then
+			echo "unmounting $mountpoint"
+			`umount $mountpoint`
+		fi
+	done
+	unset IFS #reset to default split
+	#delete unused dirs
+	#echo "delete time"
+	`rm -r  $mountbase`
+	exit
+fi
 
+#if the $mountbase directory doesn't exist create it and all the path to it
+if [ ! -d $mountbase ]; then
+	mkdir -p $mountbase
+fi
 
-
-#delete unused dirs
-#echo "delete time"
-`rm -r  $mountbase`
-#make sure we have the s3 directory to mount to
-mkdir -p $mountbase
 
 
 #itterate through the list of profiles
@@ -49,43 +53,64 @@ for profile in $profiles; do  #itterate through profiles
     buckets=`aws --profile $profile s3api list-buckets --query "Buckets[].Name" | sed ':a;N;$!ba;s/\n/ /g' | tr -s ' ' | sed 's/^...\(.*\)...$/\1/' | sed 's/", "/ /g'`
 
     for bucket in $buckets; do
-	#if it has a dot add this flag: -o use_path_request_style
-	option=""
-	if [[ $bucket =~ "." ]]; then
-		option=" -o use_path_request_style "
-	fi
-	mkdir -p $mountbase/$bucket
 
-	#manage endpoint to get around defaults
-	locationinfo="$(aws s3api get-bucket-location --profile=$profile --bucket $bucket)"
-	reg='\"LocationConstraint\": \"(.*?)\"'
-	[[ "$locationinfo" =~ $reg ]] 
-	location="${BASH_REMATCH[1]}"
-	if [[ ! -z $location ]]; then
-		option="$option  -o url=https://s3-$location.amazonaws.com "
-	fi
-
-
-	cmd="/usr/bin/s3fs -o check_cache_dir_exist  $option $bucket $mountbase/$bucket -o passwd_file=~/.aws/passwd-s3fs-$profile "
-	#echo "$cmd"
-	eval "$cmd" #using eval to create the command in only one place but still show it on the screen
-
-	#check to see if it mounted
-	processing=true
-	while [[ (! ("$(mountpoint $mountbase/$bucket)" == *"is a mountpoint"*)) && "$processing" == true ]]; do
-		echo "$bucket is not a mount point yet"
+		#use mountgrep to see if the bucket was already mounted by a previous run if it wasn't then mount it
 		mountgrep=`mount | grep "s3fs" | grep "$bucket"`
 		if [ -z "$mountgrep" ]; then
-			echo "  There seems to have been a problem mounting $bucket to $mountbase/$bucket to troubleshoot run:"
-			echo "    $cmd -o dbglevel=info -f"
-			processing=false
+			echo "Mounting: $bucket"
 		else
-			echo "Looks like we are still trying to mount $bucket, waiting 5 seconds"
-			sleep 5
+			echo "Already mounted: $bucket"
+			continue
 		fi
-	done
-	if [[ "$processing" == true ]]; then
-		echo "   Mounted: $bucket"   
-	fi
+
+
+		#if it has a dot add this flag: -o use_path_request_style
+		option=""
+		if [[ $bucket =~ "." ]]; then
+			option=" -o use_path_request_style "
+		fi
+		mkdir -p $mountbase/$bucket
+
+		#manage endpoint to get around defaults
+		locationinfo="$(aws s3api get-bucket-location --profile=$profile --bucket $bucket)"
+		reg='\"LocationConstraint\": \"(.*?)\"'
+		[[ "$locationinfo" =~ $reg ]] 
+		location="${BASH_REMATCH[1]}"
+		if [[ ! -z $location ]]; then
+			option="$option  -o url=https://s3-$location.amazonaws.com "
+		fi
+
+
+		cmd="/usr/bin/s3fs -o check_cache_dir_exist  $option $bucket $mountbase/$bucket -o passwd_file=~/.aws/passwd-s3fs-$profile "
+		#echo "$cmd"
+
+
+	
+
+		eval "$cmd" #using eval to create the command in only one place but still show it on the screen
+
+		#check to see if it mounted
+		processing=true
+		while [[ (! ("$(mountpoint $mountbase/$bucket)" == *"is a mountpoint"*)) && "$processing" == true ]]; do
+			echo "$bucket is not a mount point yet"
+			mountgrep=`mount | grep "s3fs" | grep "$bucket"`
+			if [ -z "$mountgrep" ]; then
+				echo "  There seems to have been a problem mounting $bucket to $mountbase/$bucket to troubleshoot run:"
+				echo "    $cmd -o dbglevel=info -f"
+				processing=false
+			else
+				echo "Looks like we are still trying to mount $bucket, waiting 5 seconds"
+				sleep 5
+			fi
+		done
+		if [[ "$processing" == true ]]; then
+			echo "   Mounted: $bucket"   
+		fi
+
+
+
+
+
+
     done
 done
