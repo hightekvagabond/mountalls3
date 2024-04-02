@@ -6,6 +6,10 @@
 
 #it was written to run on my kbuntu instances so if you are running it somewhere else you might have to fix some pathing on things.
 
+#I have it running on reboot from my crontab:
+#@reboot gypsy   /home/gypsy/mounts3/mounts3.sh > /home/gypsy/mounts3/mounts3.log 2>&1
+
+
 
 #get a list of profiles
 profiles=$(aws configure list-profiles)
