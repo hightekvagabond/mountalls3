@@ -265,9 +265,9 @@ for profile in $profiles; do  # Iterate through profiles
         # Create mount directory
         mkdir -p "$mountbase/$bucket"
 
-        # If bucket name contains dots, add use_path_request_style option
+        # If bucket name contains dots or underscores, add use_path_request_style option
         option=""
-        if [[ $bucket =~ "." ]]; then
+        if [[ $bucket =~ "." ]] || [[ $bucket =~ "_" ]]; then
             option=" -o use_path_request_style "
         fi
 
