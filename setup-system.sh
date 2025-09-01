@@ -219,10 +219,8 @@ add_to_bashrc_path() {
 }
 
 # Configures system-level performance optimizations (requires root)
-# Checks for sudo privileges and prompts for optimization settings
+# Checks for sudo privileges and goes directly to optimization selection
 configure_system_optimizations() {
-    print_header "System Performance Optimizations"
-    
     if [[ $EUID -ne 0 ]]; then
         print_warning "System optimizations require root privileges"
         print_info "Run with sudo for system-level optimizations:"
@@ -230,18 +228,8 @@ configure_system_optimizations() {
         return 1
     fi
     
-    local enable_optimizations=""
-    configure_value "enable_optimizations" \
-        "System optimizations improve s3fs performance by excluding mount directories from system scans (updatedb/locate) and optimizing kernel parameters." \
-        "Enable system performance optimizations?" \
-        "y" \
-        "y,n"
-    
-    if [[ "$enable_optimizations" == "y" ]]; then
+    # Go directly to the detailed optimization selection
         apply_system_optimizations
-    else
-        print_info "Skipped system optimizations"
-    fi
 }
 
 # Applies updatedb optimization to exclude s3fs mounts from locate database
@@ -409,44 +397,47 @@ apply_optimization_updatedb() {
     # Check if already applied
     local updatedb_conf="/etc/updatedb.conf"
     if [[ -f "$updatedb_conf" ]] && grep -q '^[[:space:]]*PRUNEFS="[^"]*fuse\.s3fs[^"]*"' "$updatedb_conf"; then
-        print_info "UpdateDB optimization already applied"
-        return 0
+        print_info "✅ UpdateDB optimization already applied - skipping"
+        return 1  # Return 1 to indicate "not newly applied"
     fi
+    
+    # Explain what this optimization does
+    echo "WHAT IT DOES:"
+    echo "This optimization prevents the 'locate' command from scanning s3fs mount points by adding"
+    echo "'fuse.s3fs' to the PRUNEFS setting in /etc/updatedb.conf."
+    echo ""
+    echo "WHY IT HELPS:"
+    echo "  • Prevents updatedb from causing high I/O on S3 buckets"
+    echo "  • Reduces S3 API calls and costs (can save hundreds of calls per updatedb run)"
+    echo "  • Eliminates potential s3fs hangs during updatedb runs"
+    echo "  • Prevents system slowdowns when locate database is rebuilt"
+    echo ""
     
     # Check logs for updatedb/locate issues
     local logs_show_issue=false
+    echo "LOG ANALYSIS:"
     if check_logs_for_s3fs_issues; then
         logs_show_issue=true
-    fi
-    
-    # Explain the optimization
-    echo "This optimization prevents the 'locate' command from scanning s3fs mount points."
-    echo "Benefits:"
-    echo "  • Prevents updatedb from causing high I/O on S3 buckets"
-    echo "  • Reduces S3 API calls and costs"
-    echo "  • Eliminates potential s3fs hangs during updatedb runs"
-    echo ""
-    echo "📝 To undo manually:"
-    echo "  sudo cp /etc/updatedb.conf.backup.* /etc/updatedb.conf"
-    echo "  sudo updatedb  # Rebuild locate database"
-    echo ""
-    
-    if [[ "$logs_show_issue" == true ]]; then
-        echo "✅ Your logs show evidence of s3fs performance issues that this could help resolve."
     else
         echo "ℹ️  No evidence of updatedb/locate issues in recent logs, but this is still a good preventive measure."
     fi
     echo ""
     
+    echo "📝 HOW TO UNDO:"
+    echo "  sudo cp /etc/updatedb.conf.backup.* /etc/updatedb.conf"
+    echo "  sudo updatedb  # Rebuild locate database"
+    echo ""
+    
     if [[ "$force_apply" != true ]]; then
         if ! prompt_yes_no "Apply updatedb optimization now?" "y"; then
             print_info "Skipped updatedb optimization (you can run this again later if needed)"
-            return 0
+            return 1  # Return 1 to indicate "not applied"
         fi
     fi
     
     # Apply the optimization
     apply_system_optimizations_updatedb
+    return 0  # Return 0 to indicate "successfully applied"
 }
 
 # Optimizes file descriptor limits for s3fs
@@ -462,31 +453,38 @@ apply_optimization_file_limits() {
     
     # Check if already optimized
     if [[ $current_soft -ge 65536 ]]; then
-        print_info "File descriptor limits already optimized (current: $current_soft)"
-        return 0
+        print_info "✅ File descriptor limits already optimized (current: $current_soft) - skipping"
+        return 1  # Return 1 to indicate "not newly applied"
     fi
     
     # Check if we've already modified limits.conf
     if grep -q "# MountAllS3 file descriptor limits" /etc/security/limits.conf 2>/dev/null; then
-        print_info "File descriptor limit configuration already applied"
+        print_info "✅ File descriptor limit configuration already applied - skipping"
         print_warning "Current limit is still $current_soft - you may need to restart your session"
-        return 0
+        return 1  # Return 1 to indicate "not newly applied"
     fi
     
-    # Explain the optimization
-    echo "This optimization increases file descriptor limits for better s3fs performance."
-    echo "Changes:"
-    echo "  • Soft limit: 65536 file descriptors"
-    echo "  • Hard limit: 65536 file descriptors"
+    # Explain what this optimization does
+    echo "WHAT IT DOES:"
+    echo "This optimization increases file descriptor limits for better s3fs performance by:"
+    echo "  • Setting soft/hard limits to 65536 file descriptors in /etc/security/limits.conf"
+    echo "  • Setting system-wide limit to 1,000,000 in /etc/sysctl.conf"
     echo "  • Current soft limit: $current_soft"
     echo "  • Current hard limit: $current_hard"
     echo ""
-    echo "Benefits:"
+    echo "WHY IT HELPS:"
     echo "  • Prevents 'too many open files' errors with s3fs"
-    echo "  • Allows more concurrent S3 connections"
-    echo "  • Better performance with large directory structures"
+    echo "  • Allows more concurrent S3 connections for better performance"
+    echo "  • Better handling of large directory structures"
+    echo "  • Enables s3fs to maintain more cache files simultaneously"
     echo ""
-    echo "📝 To undo manually:"
+    
+    # No log analysis needed for file limits - this is preventive
+    echo "LOG ANALYSIS:"
+    echo "ℹ️  This is a preventive optimization - 'too many open files' errors would appear in logs if needed."
+    echo ""
+    
+    echo "📝 HOW TO UNDO:"
     echo "  sudo cp /etc/security/limits.conf.backup.* /etc/security/limits.conf"
     echo "  Edit /etc/sysctl.conf and remove/change fs.file-max line"
     echo "  sudo sysctl -p && restart your session"
@@ -497,7 +495,7 @@ apply_optimization_file_limits() {
     if [[ "$force_apply" != true ]]; then
         if ! prompt_yes_no "Apply file descriptor limit optimizations?" "y"; then
             print_info "Skipped file descriptor limit optimizations"
-            return 0
+            return 1  # Return 1 to indicate "not applied"
         fi
     fi
     
@@ -528,6 +526,7 @@ EOF
     print_success "File descriptor limit optimizations applied"
     print_info "💡 Changes take effect for new login sessions"
     print_info "   Current session limit is still $current_soft"
+    return 0  # Return 0 to indicate "successfully applied"
 }
 
 # Optimizes network buffer sizes for better S3 throughput  
@@ -539,8 +538,8 @@ apply_optimization_network_buffers() {
     
     # Check if already applied
     if grep -q "# MountAllS3 network optimizations" /etc/sysctl.conf 2>/dev/null; then
-        print_info "Network buffer optimizations already applied"
-        return 0
+        print_info "✅ Network buffer optimizations already applied - skipping"
+        return 1  # Return 1 to indicate "not newly applied"
     fi
     
     # Check logs for network issues
@@ -549,36 +548,41 @@ apply_optimization_network_buffers() {
         logs_show_issue=true
     fi
     
-    # Explain the optimization
-    echo "This optimization increases network buffer sizes for better S3 throughput."
-    echo "Changes:"
+    # Explain what this optimization does
+    echo "WHAT IT DOES:"
+    echo "This optimization increases network buffer sizes for better S3 throughput by modifying /etc/sysctl.conf:"
     echo "  • net.core.rmem_max=16777216 (16MB receive buffer)"
     echo "  • net.core.wmem_max=16777216 (16MB send buffer)" 
     echo "  • net.ipv4.tcp_rmem='4096 87380 16777216' (TCP receive window scaling)"
     echo "  • net.ipv4.tcp_wmem='4096 65536 16777216' (TCP send window scaling)"
     echo ""
-    echo "Benefits:"
-    echo "  • Higher throughput for large S3 transfers"
-    echo "  • Better handling of high-latency connections"
-    echo "  • Reduced TCP retransmissions"
-    echo ""
-    echo "📝 To undo manually:"
-    echo "  sudo cp /etc/sysctl.conf.backup.* /etc/sysctl.conf"
-    echo "  sudo sysctl -p  # Or edit /etc/sysctl.conf and remove MountAllS3 network section"
+    echo "WHY IT HELPS:"
+    echo "  • Higher throughput for large S3 transfers (especially >100MB files)"
+    echo "  • Better handling of high-latency connections to AWS"
+    echo "  • Reduced TCP retransmissions and timeouts"
+    echo "  • More efficient use of available bandwidth"
     echo ""
     
-    if [[ "$logs_show_issue" == true ]]; then
-        echo "✅ Your logs show evidence of network issues that this could help resolve."
+    # Check logs for network issues
+    echo "LOG ANALYSIS:"
+    local logs_show_issue=false
+    if check_logs_for_network_issues; then
+        logs_show_issue=true
     else
         echo "ℹ️  No evidence of network issues in recent logs."
         echo "   This optimization provides benefits mainly for high-throughput S3 workloads."
     fi
     echo ""
     
+    echo "📝 HOW TO UNDO:"
+    echo "  sudo cp /etc/sysctl.conf.backup.* /etc/sysctl.conf"
+    echo "  sudo sysctl -p  # Or edit /etc/sysctl.conf and remove MountAllS3 network section"
+    echo ""
+    
     if [[ "$force_apply" != true ]]; then
         if ! prompt_yes_no "Apply network buffer optimizations?" "n"; then
             print_info "Skipped network buffer optimizations"
-            return 0
+            return 1  # Return 1 to indicate "not applied"
         fi
     fi
     
@@ -604,67 +608,67 @@ EOF
     sysctl -p >/dev/null 2>&1
     
     print_success "Network buffer optimizations applied"
+    return 0  # Return 0 to indicate "successfully applied"
 }
 
-# Applies selected system-level optimizations for s3fs performance
-# Now provides individual optimization selection with safety checks
+# Applies system-level optimizations one by one with detailed explanations
+# Each optimization gets full explanation before user consent
 apply_system_optimizations() {
     print_header "System Performance Optimizations"
     
-    echo "Available optimizations (safer options are recommended):"
+    echo "I'll walk you through each available optimization individually."
+    echo "For each one, you'll see:"
+    echo "  • What the optimization does"
+    echo "  • Why it might help"
+    echo "  • Log analysis to see if you're experiencing the issue"
+    echo "  • How to undo the change"
     echo ""
-    echo "1. 🟢 UpdateDB optimization (SAFE - recommended for all users)"
-    echo "   Prevents locate/updatedb from scanning s3fs mounts"
-    echo ""
-    echo "2. 🟢 File descriptor limits (SAFE - recommended for all users)"
-    echo "   Increases file descriptor limits to prevent 'too many open files' errors"
-    echo ""
-    echo "3. 🟡 Network buffer optimization (MODERATE - for high-throughput workloads)"
-    echo "   Increases network buffer sizes for better S3 transfer speeds"
-    echo ""
-    echo "ℹ️  More advanced optimizations are available via:"
-    echo "   sudo ./setup-system-advanced.sh"
+    echo "You can decline any optimization and move to the next one."
     echo ""
     
-    local selected_opts=""
-    configure_value "selected_opts" \
-        "Enter comma-separated numbers (e.g., 1,2) for optimizations to apply. Each will ask for individual confirmation." \
-        "Which optimizations to apply?" \
-        "1,2" \
-        ""
-    
-    if [[ "$selected_opts" == "all" ]]; then
-        selected_opts="1,2,3"
+    if ! prompt_yes_no "Ready to review system optimizations?" "y"; then
+        print_info "System optimization review cancelled"
+        return 0
     fi
     
     local applied_any=false
-    IFS=',' read -ra opt_array <<< "$selected_opts"
-    for opt in "${opt_array[@]}"; do
-        case "${opt// /}" in
-            1) 
-                apply_optimization_updatedb
-                applied_any=true
-                ;;
-            2) 
-                apply_optimization_file_limits
-                applied_any=true
-                ;;
-            3) 
-                apply_optimization_network_buffers
-                applied_any=true
-                ;;
-            *) 
-                print_warning "Unknown optimization: $opt" 
-                ;;
-        esac
-        echo ""  # Add spacing between optimizations
-    done
+    
+    # Go through each optimization individually
+    echo ""
+    apply_optimization_updatedb
+    if [[ $? -eq 0 ]]; then
+        applied_any=true
+    fi
+    
+    echo ""
+    apply_optimization_file_limits
+    if [[ $? -eq 0 ]]; then
+        applied_any=true
+    fi
+    
+    echo ""
+    apply_optimization_network_buffers
+    if [[ $? -eq 0 ]]; then
+        applied_any=true
+    fi
+    
+    echo ""
+    print_header "Additional Advanced Optimizations Available"
+    echo "More advanced optimizations (higher risk) are available via:"
+    echo "  sudo ./setup-system-advanced.sh"
+    echo ""
+    echo "These include:"
+    echo "  • Kernel VM parameter tuning (for I/O issues)"
+    echo "  • I/O scheduler optimization (for SSD systems)"
+    echo "  • Memory management tuning (for large cache workloads)"
+    echo ""
     
     if [[ "$applied_any" == true ]]; then
-        print_success "System optimization configuration completed"
-        print_info "💡 Additional optimizations can be added in the future if performance issues arise"
+        print_success "System optimization review completed"
+        print_info "💡 You can run this again anytime to apply additional optimizations"
     else
         print_info "No optimizations were applied"
+        print_info "💡 You can run this again anytime when you're ready"
     fi
 }
 
