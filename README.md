@@ -1,6 +1,8 @@
-# S3 Bucket Mount Script
+# MountAllS3
 
 A bash script that automatically mounts Amazon S3 buckets as local filesystem directories using s3fs-fuse. Mount all your S3 buckets from all AWS profiles or selectively mount from specific profiles with customizable locations.
+
+> **Note:** This script has been developed and tested on Ubuntu. While it should work on other Linux distributions and macOS, you may need to make adjustments for different package managers or system configurations. Pull requests for compatibility improvements are welcome!
 
 ## 🚀 Features
 
@@ -9,6 +11,11 @@ A bash script that automatically mounts Amazon S3 buckets as local filesystem di
 - **Smart Bucket Handling**: Automatically handles buckets with dots in names and different regions
 - **Duplicate Prevention**: Detects and skips already mounted buckets
 - **Easy Unmounting**: Simple command to unmount all S3 buckets at once
+- **Performance Optimized**: Built-in caching and optimizations to minimize resource usage
+- **Bucket Groups**: Organize buckets into logical groups (user-folders, websites, infra, etc.)
+- **Smart Defaults**: Configure which groups mount automatically
+- **Auto-Start Integration**: Desktop environment autostart support
+- **System Integration**: Prevents unnecessary scanning by system utilities
 - **Comprehensive Error Handling**: Clear error messages and troubleshooting guidance
 - **Prerequisite Validation**: Automatic checks for required tools and configuration
 
@@ -17,25 +24,27 @@ A bash script that automatically mounts Amazon S3 buckets as local filesystem di
 The script automatically checks for these requirements and provides installation instructions if missing:
 
 1. **s3fs-fuse** - FUSE-based file system for S3
-2. **AWS CLI** - Amazon Web Services command line interface
-3. **AWS Credentials** - Properly configured AWS profiles with access keys
+2. **keyutils** - Linux session keyring support for secure credential storage
+3. **AWS CLI** - Amazon Web Services command line interface
+4. **AWS Credentials** - Properly configured AWS profiles with access keys
 
 ### Quick Installation
 
 **Ubuntu/Debian:**
 ```bash
 sudo apt-get update
-sudo apt-get install s3fs awscli
+sudo apt-get install s3fs awscli keyutils
 ```
 
 **CentOS/RHEL:**
 ```bash
-sudo yum install s3fs-fuse awscli
+sudo yum install s3fs-fuse awscli keyutils
 ```
 
 **macOS:**
 ```bash
 brew install s3fs awscli
+# Note: keyutils not available on macOS - script will use alternative approach
 ```
 
 **Configure AWS:**
@@ -49,130 +58,216 @@ aws configure --profile myprofile
 
 1. **Download the script:**
    ```bash
-   wget https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/mounts3.sh
+   wget https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/mountalls3.sh
    # OR
-   curl -O https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/mounts3.sh
+   curl -O https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/mountalls3.sh
    ```
 
 2. **Make it executable:**
    ```bash
-   chmod +x mounts3.sh
+   chmod +x mountalls3.sh
    ```
 
-3. **Run it:**
+3. **Run setup:**
    ```bash
-   ./mounts3.sh
+   ./setup-mountalls3.sh
+   ```
+
+4. **Start using:**
+   ```bash
+   ./mountalls3.sh
+   # Or if you set up symlinks: mountalls3
    ```
 
 ## 📖 Usage
 
-### Basic Commands
+For complete usage instructions, command line options, and examples:
 
 ```bash
-# Mount all buckets from all AWS profiles (default behavior)
-./mounts3.sh
-
-# Mount buckets from a specific profile only
-./mounts3.sh -p my-work-profile
-
-# Mount to a custom location instead of ~/s3
-./mounts3.sh -m /mnt/s3
-
-# Combine profile and custom location
-./mounts3.sh -p production -m /production/s3
-
-# Unmount all S3 buckets
-./mounts3.sh --unmount
-
-# Show help
-./mounts3.sh --help
+./mountalls3.sh --help
 ```
 
-### Command Line Options
+## 🔄 Auto-Start Setup
 
-| Option | Description |
-|--------|-------------|
-| `(no options)` | Mount all buckets from all AWS profiles to `~/s3` |
-| `-p, --profile PROFILE` | Mount buckets from specific AWS profile only |
-| `-m, --mount-base PATH` | Override default mount location |
-| `-u, --unmount, unmount` | Unmount all S3 buckets |
-| `-h, --help` | Show help message |
-
-### Examples
-
-**Mount everything:**
-```bash
-./mounts3.sh
-```
-
-**Work with specific environments:**
-```bash
-# Mount only production buckets
-./mounts3.sh -p production
-
-# Mount development buckets to a specific location
-./mounts3.sh -p development -m /dev/s3
-
-# Mount personal buckets to home directory
-./mounts3.sh -p personal -m ~/personal-s3
-```
-
-**Cleanup:**
-```bash
-# Unmount everything
-./mounts3.sh --unmount
-```
-
-## 🔄 Automation
-
-### Crontab (Auto-mount on reboot)
-
-Add to your crontab to automatically mount S3 buckets on system startup:
+Use the setup script to configure MountAllS3 to automatically start when you log in:
 
 ```bash
-crontab -e
+./setup-mountalls3.sh
 ```
 
-Add this line:
+The setup script will:
+- Create desktop environment autostart entries (works with GNOME, KDE Plasma, XFCE, etc.)
+- Set up symlinks to your personal bin directory for easy access
+- Configure system-level performance optimizations (if run with sudo)
+- Set up your bucket groups and preferences
+- Allow you to enable/disable auto-start easily
+
+This is much more user-friendly than crontab and integrates properly with your desktop environment.
+
+### Personal Bin Directory Integration
+
+The setup script can create symlinks in your personal bin directory (`~/bin`, `~/.local/bin`, etc.) so you can run `mountalls3` from anywhere:
+
 ```bash
-@reboot /path/to/mounts3.sh > /path/to/mounts3.log 2>&1
+# After setup with symlinks
+mountalls3              # Mount default groups
+mountalls3 -g websites   # Mount specific groups
+mountalls3 --setup      # Access setup from anywhere
+mountalls3 --unmount    # Unmount all
 ```
 
-### Systemd Service (Advanced)
+## 🧹 Directory Cleanup
 
-For more robust startup handling, you can create a systemd service:
+MountAllS3 automatically cleans up empty unmounted directories after each run to prevent mount directory clutter. The cleanup function includes multiple safety checks to ensure only truly empty, unmounted directories are removed.
+
+Use `./mountalls3.sh --cleanup` for manual cleanup or see `--help` for details.
+
+## ⚙️ Configuration
+
+MountAllS3 uses a configuration file at `~/.config/mountalls3/config.yaml` to organize your S3 buckets into logical groups.
+
+### Initial Setup
+
+Run the setup script to create your configuration:
 
 ```bash
-sudo nano /etc/systemd/system/s3-mount.service
+./setup-mountalls3.sh
 ```
 
-```ini
-[Unit]
-Description=Mount S3 Buckets
-After=network.target
+### Configuration File Structure
 
-[Service]
-Type=oneshot
-User=yourusername
-ExecStart=/path/to/mounts3.sh
-RemainAfterExit=yes
+```yaml
+# Default settings
+defaults:
+  mount_groups: ["user-folders"]  # Groups to mount by default
+  mount_base: "~/s3"              # Default mount directory
+  aws_profile: "all"              # AWS profile to use
 
-[Install]
-WantedBy=multi-user.target
+# Bucket groups
+groups:
+  user-folders:
+    description: "Personal user folders and data"
+    buckets:
+      - profile: "personal"
+        bucket: "my-personal-files"
+      - profile: "work"
+        bucket: "user-documents"
+  
+  websites:
+    description: "Website assets and static files"
+    buckets:
+      - profile: "production"
+        bucket: "company-website-assets"
+      - profile: "personal"
+        bucket: "personal-blog-assets"
 ```
 
-Enable the service:
+### Using Groups
+
 ```bash
-sudo systemctl enable s3-mount.service
-sudo systemctl start s3-mount.service
+# Mount default groups (from config)
+./mountalls3.sh
+
+# Mount specific groups
+./mountalls3.sh -g user-folders,websites
+
+# List available groups
+./mountalls3.sh --list-groups
+
+# Mount all buckets (ignore config)
+./mountalls3.sh -a
 ```
 
-## 🔒 Security Notes
+## ⚡ Performance Optimizations
 
-- The script creates temporary password files (`~/.aws/passwd-s3fs-PROFILE`) with 600 permissions
-- AWS credentials are read from your existing `~/.aws/credentials` file
-- Consider using AWS IAM roles or temporary credentials for enhanced security
-- Never commit AWS credentials to version control
+This script includes several performance optimizations to minimize resource usage when s3fs mounts are idle:
+
+### Built-in Optimizations
+
+- **Local Caching**: Uses `~/.cache/s3fs/` for faster file access and reduced S3 API calls
+- **Optimized Mount Options**: 
+  - `enable_noobj_cache`: Caches non-existent files to reduce repeated checks
+  - `multireq_max=20`: Increases parallel requests for better throughput
+  - `ensure_diskfree=1024`: Maintains 1GB free space for cache operations
+- **Smart Region Detection**: Automatically sets optimal S3 endpoints
+
+### System Configuration
+
+The biggest performance issue with idle s3fs mounts comes from system utilities scanning mounted directories. The setup script handles this automatically:
+
+```bash
+sudo ./setup-mountalls3.sh
+```
+
+This prevents tools like `mlocate`/`updatedb` from traversing s3fs directories, which can cause:
+- Thousands of unnecessary S3 API calls per minute
+- High memory usage (multiple GBs in some cases)
+- Network bandwidth consumption
+- Increased AWS costs
+
+### Monitoring Performance
+
+Check s3fs resource usage:
+```bash
+# Monitor s3fs processes
+ps aux | grep s3fs
+
+# Check cache disk usage
+du -sh ~/.cache/s3fs/*
+
+# View mounted buckets
+mount | grep s3fs
+```
+
+### Helpful Shell Aliases
+
+When you have many S3 buckets mounted, `df` output can become cluttered. Add this alias to your `~/.bashrc` to automatically filter out s3fs filesystems while preserving all `df` functionality:
+
+```bash
+# Add to ~/.bashrc
+alias df='command df "$@" | grep -v "^s3fs"'
+```
+
+After adding this alias, restart your terminal or run `source ~/.bashrc`. Now `df` will show a clean output without s3fs mounts, but all flags still work normally:
+
+```bash
+df              # Clean output without s3fs clutter
+df -h           # Human readable, no s3fs
+df -T           # Show filesystem types, no s3fs
+df /home        # Check specific path, no s3fs
+```
+
+If you ever need to see s3fs mounts specifically, use:
+```bash
+command df | grep s3fs    # Show only s3fs mounts
+mount | grep s3fs         # Better way to check s3fs mounts
+```
+
+## 🔒 Security Features
+
+MountAllS3 uses modern security practices to protect your AWS credentials:
+
+### **AWS STS Temporary Credentials**
+- Generates 12-hour temporary credentials using AWS STS
+- No long-lived AWS credentials stored on disk
+- Automatic credential refresh with desktop notifications
+
+### **Linux Session Keyring Storage**
+- Credentials stored in kernel session keyring (memory-only)
+- Automatically cleared when you log out
+- No credential files written to disk
+
+### **Process Substitution**
+- s3fs receives credentials via anonymous pipes
+- Zero disk footprint for credential passing
+- Credentials never touch the filesystem
+
+### **Lazy Refresh with Notifications**
+- Credentials automatically refresh when expired
+- Desktop notifications when refresh occurs
+- Transparent to user workflow
+
+This approach is significantly more secure than storing AWS credentials in plaintext files, while maintaining the convenience of automatic mounting.
 
 ## 🐛 Troubleshooting
 
@@ -183,14 +278,27 @@ sudo systemctl start s3-mount.service
 # Make sure you have proper AWS permissions for the buckets
 aws s3 ls --profile yourprofile
 
-# Check if s3fs has proper permissions
-ls -la ~/.aws/passwd-s3fs-*
+# Test STS credential generation
+aws sts get-session-token --profile yourprofile
 ```
 
 **Mount Failures:**
 ```bash
-# Run s3fs manually with debug info
-s3fs your-bucket /path/to/mountpoint -o passwd_file=~/.aws/passwd-s3fs-profile -o dbglevel=info -f
+# Check if keyutils is installed
+keyctl show @s
+
+# Test manual mount with debug info
+# (Note: this will prompt for credentials since it bypasses our STS system)
+s3fs your-bucket /path/to/mountpoint -o dbglevel=info -f
+```
+
+**STS Token Issues:**
+```bash
+# Check current STS tokens in keyring
+keyctl show @s | grep s3fs
+
+# Clear expired tokens manually
+keyctl clear @s
 ```
 
 **Bucket Not Accessible:**
@@ -216,7 +324,7 @@ Contributions are welcome! Here are ways you can help:
 ```bash
 git clone https://github.com/YOUR_USERNAME/YOUR_REPO.git
 cd YOUR_REPO
-chmod +x mounts3.sh
+chmod +x mountalls3.sh
 ```
 
 ## 📄 License

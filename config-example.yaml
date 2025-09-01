@@ -1,0 +1,62 @@
+# MountAllS3 Configuration File
+# 
+# This file should be placed at: ~/.config/mountalls3/config.yaml
+# Copy this example and customize it for your needs.
+
+# Default settings
+defaults:
+  # Which groups to mount when no flags are specified
+  # Use 'all' to mount all buckets, or specify group names as a list
+  mount_groups: ["user-folders"]
+  
+  # Default mount base directory (can be overridden with -m flag)
+  mount_base: "~/s3"
+  
+  # Default AWS profile (use 'all' for all profiles, or specify profile name)
+  aws_profile: "all"
+
+# Bucket groups - organize your S3 buckets into logical groups
+# Each group can contain buckets from multiple AWS profiles
+groups:
+  user-folders:
+    description: "Personal user folders and data"
+    buckets:
+      - profile: "personal"
+        bucket: "my-personal-files"
+      - profile: "personal" 
+        bucket: "my-photos"
+      - profile: "work"
+        bucket: "user-documents"
+  
+  websites:
+    description: "Website assets and static files"
+    buckets:
+      - profile: "production"
+        bucket: "company-website-assets"
+      - profile: "development"
+        bucket: "dev-website-files"
+      - profile: "personal"
+        bucket: "personal-blog-assets"
+  
+  infra:
+    description: "Infrastructure backups and logs"
+    buckets:
+      - profile: "production"
+        bucket: "prod-backups"
+      - profile: "production"
+        bucket: "infrastructure-logs"
+      - profile: "development"
+        bucket: "dev-environment-backups"
+
+# Performance settings (optional - defaults will be used if not specified)
+performance:
+  enable_cache: true
+  cache_directory: "~/.cache/s3fs"
+  ensure_diskfree_mb: 1024
+  multireq_max: 20
+  parallel_count: 5
+  
+# Exclude certain buckets from being mounted (useful for very large or special-purpose buckets)
+exclude_buckets:
+  - "massive-data-warehouse"
+  - "temp-processing-bucket"

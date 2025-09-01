@@ -1,0 +1,502 @@
+#!/usr/bin/bash
+
+# =============================================================================
+# MountAllS3 Setup Script
+# =============================================================================
+#
+# DESCRIPTION:
+#   Comprehensive setup script for MountAllS3. Handles both system-level 
+#   optimizations (when run with sudo) and user-level configuration.
+#
+# FEATURES:
+#   - System performance optimization (requires sudo)
+#   - Desktop environment autostart configuration
+#   - User configuration file setup
+#   - Bucket group management
+#   - Easy enable/disable auto-start
+#
+# USAGE:
+#   ./setup-mountalls3.sh              # User-level setup only
+#   sudo ./setup-mountalls3.sh         # System + user setup
+#   ./setup-mountalls3.sh --config     # Configure groups only
+#   ./setup-mountalls3.sh --autostart  # Autostart setup only
+#
+# =============================================================================
+
+# Script directory
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+MOUNTALLS3_SCRIPT="$SCRIPT_DIR/mountalls3.sh"
+
+# Configuration paths
+CONFIG_DIR="$HOME/.config/mountalls3"
+CONFIG_FILE="$CONFIG_DIR/config.yaml"
+AUTOSTART_DIR="$HOME/.config/autostart"
+AUTOSTART_FILE="$AUTOSTART_DIR/mountalls3.desktop"
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+PURPLE='\033[0;35m'
+CYAN='\033[0;36m'
+NC='\033[0m' # No Color
+
+# Function to print colored output
+print_header() { echo -e "${PURPLE}=== $1 ===${NC}"; }
+print_success() { echo -e "${GREEN}✅ $1${NC}"; }
+print_warning() { echo -e "${YELLOW}⚠️  $1${NC}"; }
+print_error() { echo -e "${RED}❌ $1${NC}"; }
+print_info() { echo -e "${BLUE}ℹ️  $1${NC}"; }
+
+# Function to show usage
+show_usage() {
+    echo "MountAllS3 Setup Script"
+    echo ""
+    echo "Usage: $0 [OPTIONS]"
+    echo ""
+    echo "OPTIONS:"
+    echo "  (no options)      Complete setup (system + user if sudo, user only otherwise)"
+    echo "  --config          Configure bucket groups and preferences only"
+    echo "  --autostart       Configure autostart only"
+    echo "  --symlink         Setup symlink to personal bin directory only"
+    echo "  --disable-auto    Disable autostart"
+    echo "  --enable-auto     Enable autostart"
+    echo "  --status          Show current configuration status"
+    echo "  -h, --help        Show this help message"
+    echo ""
+    echo "EXAMPLES:"
+    echo "  sudo $0           # Full setup with system optimizations"
+    echo "  $0                # User setup only"
+    echo "  $0 --config       # Configure bucket groups"
+    echo "  $0 --autostart    # Setup autostart"
+    echo "  $0 --symlink      # Setup symlink to personal bin"
+}
+
+# Function to check if running as root
+is_root() {
+    [[ $EUID -eq 0 ]]
+}
+
+# Function to configure system-level performance optimizations
+configure_system_performance() {
+    if ! is_root; then
+        print_warning "System performance optimization requires sudo privileges"
+        print_info "Run 'sudo $0' for complete setup including system optimizations"
+        return 1
+    fi
+    
+    print_header "System Performance Optimization"
+    
+    # Backup and configure updatedb.conf
+    if [[ -f /etc/updatedb.conf ]]; then
+        print_info "Backing up /etc/updatedb.conf"
+        cp /etc/updatedb.conf /etc/updatedb.conf.backup.$(date +%Y%m%d_%H%M%S)
+        
+        if grep -q "fuse.s3fs" /etc/updatedb.conf; then
+            print_success "fuse.s3fs already configured in PRUNEFS"
+        else
+            print_info "Adding fuse.s3fs to PRUNEFS in /etc/updatedb.conf"
+            if grep -q "^PRUNEFS=" /etc/updatedb.conf; then
+                sed -i '/^PRUNEFS=/ s/"$/ fuse.s3fs"/' /etc/updatedb.conf
+            else
+                echo 'PRUNEFS="fuse.s3fs"' >> /etc/updatedb.conf
+            fi
+            print_success "System performance optimization configured"
+        fi
+    else
+        print_info "Creating new /etc/updatedb.conf with s3fs exclusion"
+        cat > /etc/updatedb.conf << 'EOF'
+# Configuration for updatedb(8)
+# Exclude s3fs from file indexing to prevent performance issues
+PRUNEFS="fuse.s3fs"
+EOF
+        print_success "/etc/updatedb.conf created successfully"
+    fi
+    
+    print_info "Current PRUNEFS configuration:"
+    grep "PRUNEFS=" /etc/updatedb.conf || echo "No PRUNEFS configuration found"
+}
+
+# Function to create autostart desktop entry
+create_autostart_entry() {
+    print_header "Desktop Environment Autostart Setup"
+    
+    # Create autostart directory if it doesn't exist
+    mkdir -p "$AUTOSTART_DIR"
+    
+    # Create desktop entry
+    cat > "$AUTOSTART_FILE" << EOF
+[Desktop Entry]
+Type=Application
+Name=MountAllS3
+Comment=Automatically mount S3 buckets on login
+Exec=$MOUNTALLS3_SCRIPT
+Icon=folder-remote
+Terminal=false
+NoDisplay=false
+Hidden=false
+X-GNOME-Autostart-enabled=true
+Categories=System;FileManager;
+StartupNotify=false
+EOF
+    
+    chmod +x "$AUTOSTART_FILE"
+    print_success "Autostart entry created at $AUTOSTART_FILE"
+    print_info "MountAllS3 will now start automatically when you log in"
+}
+
+# Function to disable autostart
+disable_autostart() {
+    if [[ -f "$AUTOSTART_FILE" ]]; then
+        rm "$AUTOSTART_FILE"
+        print_success "Autostart disabled - removed $AUTOSTART_FILE"
+    else
+        print_info "Autostart was not enabled"
+    fi
+}
+
+# Function to enable autostart
+enable_autostart() {
+    if [[ -f "$AUTOSTART_FILE" ]]; then
+        print_info "Autostart is already enabled"
+    else
+        create_autostart_entry
+    fi
+}
+
+# Function to create initial configuration
+create_initial_config() {
+    print_header "Configuration Setup"
+    
+    # Create config directory
+    mkdir -p "$CONFIG_DIR"
+    
+    if [[ -f "$CONFIG_FILE" ]]; then
+        print_info "Configuration file already exists at $CONFIG_FILE"
+        read -p "Do you want to reconfigure? (y/N): " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            return 0
+        fi
+    fi
+    
+    # Copy example config if it doesn't exist
+    if [[ -f "$SCRIPT_DIR/config-example.yaml" ]]; then
+        cp "$SCRIPT_DIR/config-example.yaml" "$CONFIG_FILE"
+        print_success "Configuration file created at $CONFIG_FILE"
+        print_info "Please edit this file to customize your bucket groups and settings"
+        
+        # Offer to open config file for editing
+        if command -v nano >/dev/null 2>&1; then
+            read -p "Would you like to edit the configuration now? (y/N): " -n 1 -r
+            echo
+            if [[ $REPLY =~ ^[Yy]$ ]]; then
+                nano "$CONFIG_FILE"
+            fi
+        fi
+    else
+        print_error "Example configuration file not found at $SCRIPT_DIR/config-example.yaml"
+        return 1
+    fi
+}
+
+# Function to setup symlink to personal bin directory
+setup_symlink() {
+    print_header "Personal Bin Directory Setup"
+    
+    # Common personal bin directories
+    local common_bins=("$HOME/bin" "$HOME/.local/bin" "$HOME/.bin")
+    local selected_bin=""
+    
+    # Check if any common bin directories exist
+    for bin_dir in "${common_bins[@]}"; do
+        if [[ -d "$bin_dir" ]]; then
+            print_info "Found existing bin directory: $bin_dir"
+            read -p "Use $bin_dir? (Y/n): " -n 1 -r
+            echo
+            if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+                selected_bin="$bin_dir"
+                break
+            fi
+        fi
+    done
+    
+    # If no bin directory selected, ask user to specify or create one
+    if [[ -z "$selected_bin" ]]; then
+        echo "No existing personal bin directory found."
+        echo "Common locations:"
+        echo "  1. $HOME/bin"
+        echo "  2. $HOME/.local/bin"
+        echo "  3. $HOME/.bin"
+        echo "  4. Custom path"
+        echo ""
+        read -p "Choose option (1-4) or press Enter for $HOME/bin: " choice
+        
+        case $choice in
+            1|"")
+                selected_bin="$HOME/bin"
+                ;;
+            2)
+                selected_bin="$HOME/.local/bin"
+                ;;
+            3)
+                selected_bin="$HOME/.bin"
+                ;;
+            4)
+                read -p "Enter custom bin directory path: " selected_bin
+                selected_bin="${selected_bin/#\~/$HOME}"  # Expand tilde
+                ;;
+            *)
+                print_error "Invalid choice"
+                return 1
+                ;;
+        esac
+        
+        # Create the bin directory if it doesn't exist
+        if [[ ! -d "$selected_bin" ]]; then
+            print_info "Creating bin directory: $selected_bin"
+            mkdir -p "$selected_bin"
+        fi
+    fi
+    
+    # Check if the bin directory is in PATH
+    if [[ ":$PATH:" != *":$selected_bin:"* ]]; then
+        print_warning "$selected_bin is not in your PATH"
+        print_info "You may need to add this to your ~/.bashrc or ~/.profile:"
+        echo "  export PATH=\"\$PATH:$selected_bin\""
+        echo ""
+        read -p "Would you like me to add it to ~/.bashrc? (y/N): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            echo "export PATH=\"\$PATH:$selected_bin\"" >> ~/.bashrc
+            print_success "Added to ~/.bashrc (restart terminal or run 'source ~/.bashrc')"
+        fi
+    fi
+    
+    # Create the symlink
+    local symlink_path="$selected_bin/mountalls3"
+    
+    if [[ -L "$symlink_path" ]]; then
+        local current_target=$(readlink "$symlink_path")
+        if [[ "$current_target" == "$MOUNTALLS3_SCRIPT" ]]; then
+            print_success "Symlink already exists and points to the correct script"
+            return 0
+        else
+            print_warning "Symlink exists but points to: $current_target"
+            read -p "Replace with current script? (y/N): " -n 1 -r
+            echo
+            if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+                return 0
+            fi
+            rm "$symlink_path"
+        fi
+    elif [[ -f "$symlink_path" ]]; then
+        print_error "File exists at $symlink_path (not a symlink)"
+        read -p "Replace it? (y/N): " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            return 0
+        fi
+        rm "$symlink_path"
+    fi
+    
+    # Create the symlink for mountalls3
+    ln -s "$MOUNTALLS3_SCRIPT" "$symlink_path"
+    
+    if [[ $? -eq 0 ]]; then
+        print_success "Created symlink: $symlink_path -> $MOUNTALLS3_SCRIPT"
+        print_info "You can now run 'mountalls3' from anywhere!"
+        
+        # Update autostart entry to use the symlink if it exists
+        if [[ -f "$AUTOSTART_FILE" ]]; then
+            sed -i "s|Exec=.*|Exec=$symlink_path|" "$AUTOSTART_FILE"
+            print_info "Updated autostart entry to use symlink"
+        fi
+        
+        # Ask if they want to also create a symlink for the setup script
+        echo ""
+        read -p "Also create symlink for setup script? (y/N): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            local setup_symlink_path="$selected_bin/setup-mountalls3"
+            local setup_script_path="$(dirname "$MOUNTALLS3_SCRIPT")/setup-mountalls3.sh"
+            
+            if [[ -f "$setup_script_path" ]]; then
+                if [[ -L "$setup_symlink_path" ]] || [[ -f "$setup_symlink_path" ]]; then
+                    rm "$setup_symlink_path" 2>/dev/null
+                fi
+                
+                ln -s "$setup_script_path" "$setup_symlink_path"
+                if [[ $? -eq 0 ]]; then
+                    print_success "Created setup symlink: $setup_symlink_path"
+                    print_info "You can now run 'setup-mountalls3' from anywhere!"
+                else
+                    print_warning "Failed to create setup script symlink"
+                fi
+            else
+                print_warning "Setup script not found at expected location"
+            fi
+        fi
+    else
+        print_error "Failed to create symlink"
+        return 1
+    fi
+}
+
+# Function to show current status
+show_status() {
+    print_header "MountAllS3 Status"
+    
+    # Check if script exists
+    if [[ -f "$MOUNTALLS3_SCRIPT" ]]; then
+        print_success "MountAllS3 script found at $MOUNTALLS3_SCRIPT"
+    else
+        print_error "MountAllS3 script not found at $MOUNTALLS3_SCRIPT"
+    fi
+    
+    # Check configuration
+    if [[ -f "$CONFIG_FILE" ]]; then
+        print_success "Configuration file exists at $CONFIG_FILE"
+        
+        # Show default groups
+        if default_groups=$(grep -A 5 "mount_groups:" "$CONFIG_FILE" | grep -E '^\s*-\s*' | sed 's/^\s*-\s*["'\'']\?\([^"'\'']*\)["'\'']\?/\1/' | tr '\n' ',' | sed 's/,$//'); then
+            if [[ -n "$default_groups" ]]; then
+                print_info "Default mount groups: $default_groups"
+            fi
+        fi
+    else
+        print_warning "No configuration file found"
+    fi
+    
+    # Check autostart
+    if [[ -f "$AUTOSTART_FILE" ]]; then
+        print_success "Autostart is enabled"
+    else
+        print_warning "Autostart is disabled"
+    fi
+    
+    # Check system configuration (if root)
+    if is_root; then
+        if [[ -f /etc/updatedb.conf ]] && grep -q "fuse.s3fs" /etc/updatedb.conf; then
+            print_success "System performance optimization is configured"
+        else
+            print_warning "System performance optimization is not configured"
+        fi
+    else
+        print_info "Run with sudo to check system-level configuration"
+    fi
+    
+    # Check if s3fs is mounted
+    if mount | grep -q "s3fs"; then
+        print_info "Currently mounted S3 buckets:"
+        mount | grep "s3fs" | while read line; do
+            bucket=$(echo "$line" | awk '{print $1}')
+            mountpoint=$(echo "$line" | awk '{print $3}')
+            echo "  • $bucket → $mountpoint"
+        done
+    else
+        print_info "No S3 buckets currently mounted"
+    fi
+}
+
+# Function to run interactive configuration wizard
+interactive_config() {
+    print_header "Interactive Configuration Wizard"
+    
+    echo "This wizard will help you configure MountAllS3."
+    echo ""
+    
+    # Check prerequisites
+    if ! command -v s3fs >/dev/null 2>&1; then
+        print_error "s3fs-fuse is not installed. Please install it first:"
+        echo "  Ubuntu/Debian: sudo apt-get install s3fs"
+        return 1
+    fi
+    
+    if ! command -v aws >/dev/null 2>&1; then
+        print_error "AWS CLI is not installed. Please install it first:"
+        echo "  Ubuntu/Debian: sudo apt-get install awscli"
+        return 1
+    fi
+    
+    # Create configuration
+    create_initial_config
+    
+    # Ask about autostart
+    echo ""
+    read -p "Do you want MountAllS3 to start automatically when you log in? (Y/n): " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+        create_autostart_entry
+    fi
+    
+    # Ask about symlink to personal bin
+    echo ""
+    read -p "Do you want to create a symlink in your personal bin directory? (Y/n): " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+        setup_symlink
+    fi
+    
+    # System optimization (if root)
+    if is_root; then
+        echo ""
+        read -p "Configure system performance optimizations? (Y/n): " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+            configure_system_performance
+        fi
+    fi
+    
+    echo ""
+    print_success "Setup completed!"
+    
+    print_info "You can now run: $MOUNTALLS3_SCRIPT"
+    if [[ -L "$HOME/bin/mountalls3" ]] || [[ -L "$HOME/.local/bin/mountalls3" ]]; then
+        print_info "Or simply run: mountalls3 (from anywhere)"
+    fi
+    print_info "To modify settings, edit: $CONFIG_FILE"
+    print_info "To check status, run: $0 --status"
+    print_info "To access setup again, run: mountalls3 --setup"
+}
+
+# Main script logic
+main() {
+    # Parse arguments
+    case "${1:-}" in
+        --config)
+            create_initial_config
+            ;;
+        --autostart)
+            create_autostart_entry
+            ;;
+        --symlink)
+            setup_symlink
+            ;;
+        --disable-auto)
+            disable_autostart
+            ;;
+        --enable-auto)
+            enable_autostart
+            ;;
+        --status)
+            show_status
+            ;;
+        -h|--help)
+            show_usage
+            ;;
+        "")
+            # Default: run interactive setup
+            interactive_config
+            ;;
+        *)
+            print_error "Unknown option: $1"
+            show_usage
+            exit 1
+            ;;
+    esac
+}
+
+# Run main function
+main "$@"
