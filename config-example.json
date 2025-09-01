@@ -16,6 +16,10 @@
         {"profile": "personal", "bucket": "my-personal-files"},
         {"profile": "personal", "bucket": "my-photos"},
         {"profile": "work", "bucket": "user-documents"}
+      ],
+      "patterns": [
+        {"profile": "personal", "pattern": "gypsy", "description": "Personal buckets containing 'gypsy'"},
+        {"profile": "work", "pattern": "backup", "description": "Backup buckets"}
       ]
     },
     "websites": {
@@ -24,6 +28,10 @@
         {"profile": "production", "bucket": "company-website-assets"},
         {"profile": "development", "bucket": "dev-website-files"},
         {"profile": "personal", "bucket": "personal-blog-assets"}
+      ],
+      "patterns": [
+        {"profile": "production", "pattern": ".com", "description": "Domain buckets ending in .com"},
+        {"profile": "personal", "pattern": "www.", "description": "Website buckets starting with www."}
       ]
     },
     "infra": {
@@ -32,6 +40,11 @@
         {"profile": "production", "bucket": "prod-backups"},
         {"profile": "production", "bucket": "infrastructure-logs"},
         {"profile": "development", "bucket": "dev-environment-backups"}
+      ],
+      "patterns": [
+        {"profile": "*", "pattern": "dev", "description": "Development buckets (any profile)"},
+        {"profile": "production", "pattern": "log", "description": "Production log buckets"},
+        {"profile": "staging", "pattern": "*", "description": "All buckets from staging profile"}
       ]
     }
   },

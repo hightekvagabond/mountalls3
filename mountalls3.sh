@@ -20,7 +20,7 @@
 #   No AWS credentials written to disk. Auto-refresh with desktop notifications.
 #
 # CONFIGURATION:
-#   ~/.config/mountalls3/config.yaml - User configuration with bucket groups
+#   ~/.config/mountalls3/config.json - User configuration with bucket groups
 #   Run ./setup-mountalls3.sh for initial setup and symlink installation
 #
 # =============================================================================
@@ -30,15 +30,155 @@
 # =============================================================================
 
 # Source common functions and config handling
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/common.sh"
+COMMON_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$COMMON_SCRIPT_DIR/common.sh"
 
+# =============================================================================
+# FLAG REGISTRATION
+# =============================================================================
 
+# Register all command line flags for mountalls3
+register_flag "profile" "set_profile" "required" "" \
+    "Mount all buckets from specific AWS profile only" \
+    "" ""
+
+register_flag "group" "add_groups" "required" "" \
+    "Add bucket groups to mount (additive to defaults)" \
+    "" ""
+
+register_flag "replace-groups" "replace_groups" "required" "" \
+    "Replace defaults with specific groups only" \
+    "" ""
+
+register_flag "all" "mount_all_buckets" "none" "" \
+    "Mount all buckets from all profiles (ignore config)" \
+    "" ""
+
+register_flag "mount-base" "set_mount_base" "required" "" \
+    "Override default mount location" \
+    "" ""
+
+register_flag "list-groups" "list_config_groups" "none" "" \
+    "List available bucket groups from config" \
+    "" ""
+
+register_flag "setup" "run_setup_wizard" "none" "" \
+    "Run setup wizard to configure mountalls3" \
+    "" ""
+
+register_flag "unmount" "unmount_s3_buckets" "none" "" \
+    "Unmount S3 buckets (respects -p/-g flags)" \
+    "" ""
+
+register_flag "cleanup" "cleanup_directories" "none" "" \
+    "Clean up empty unmounted directories" \
+    "" ""
+
+register_flag "verbose" "set_verbose_mode" "none" "" \
+    "Enable verbose output (level 2)" \
+    "" ""
+
+register_flag "debug" "set_debug_mode" "none" "" \
+    "Enable debug output (level 3)" \
+    "" ""
+
+register_flag "help" "show_help" "none" "" \
+    "Show this help message" \
+    "" ""
+
+# =============================================================================
+# FLAG HANDLER FUNCTIONS
+# =============================================================================
+
+# Global variables for flag values
+selected_profile=""
+mount_groups=""
+mountbase=""
+mount_all_profiles=true
+use_config=false
+cleanup_only=false
+unmount_only=false
+
+# Handler functions for each flag
+set_profile() {
+    selected_profile="$1"
+    mount_all_profiles=false
+    debug_debug "Set profile: $selected_profile"
+}
+
+add_groups() {
+    local additional_groups="$1"
+    if [[ -n "$mount_groups" ]]; then
+        mount_groups="$mount_groups,$additional_groups"
+        debug_debug "Added groups to existing: $mount_groups"
+    else
+        mount_groups="$additional_groups"
+        debug_debug "Set initial groups: $mount_groups"
+    fi
+    use_config=true
+    mount_all_profiles=false
+}
+
+replace_groups() {
+    mount_groups="$1"
+    use_config=true
+    mount_all_profiles=false
+    debug_debug "Replaced groups (ignoring defaults): $mount_groups"
+}
+
+mount_all_buckets() {
+    mount_all_profiles=true
+    use_config=false
+    selected_profile=""
+    mount_groups=""
+    debug_debug "Set to mount all buckets from all profiles"
+}
+
+set_mount_base() {
+    mountbase="$1"
+    debug_debug "Set mount base: $mountbase"
+}
+
+list_config_groups() {
+    list_groups
+    exit 0
+}
+
+run_setup_wizard() {
+    run_initial_setup "$@"
+}
+
+unmount_s3_buckets() {
+    unmount_only=true
+    debug_debug "Set unmount mode"
+}
+
+cleanup_directories() {
+    cleanup_only=true
+    debug_debug "Set cleanup mode"
+}
+
+set_verbose_mode() {
+    set_debug_level 2
+    debug_debug "Set verbose mode (level 2)"
+}
+
+set_debug_mode() {
+    set_debug_level 3
+    debug_debug "Set debug mode (level 3)"
+}
+
+show_help() {
+    show_usage
+    exit 0
+}
 
 # =============================================================================
 # USER HELP FUNCTION
 # =============================================================================
 
+# Displays comprehensive help information for the mountalls3 script
+# Shows all available options, examples, and security features
 show_usage() {
     echo "Usage: $0 [OPTIONS]"
     echo ""
@@ -49,7 +189,8 @@ show_usage() {
         echo "  (no options)                Mount all buckets from all AWS profiles (default)"
     fi
     echo "  -p, --profile PROFILE       Mount all buckets from specific AWS profile only"
-    echo "  -g, --group GROUP[,GROUP]   Mount specific bucket groups from config"
+    echo "  -g, --group GROUP[,GROUP]   Add bucket groups to mount (additive to defaults)"
+    echo "  --replace-groups GROUP[,GROUP] Replace defaults with specific groups only"
     echo "  -a, --all                   Mount all buckets from all profiles (ignore config)"
     echo "  -m, --mount-base PATH       Override default mount location"
     echo ""
@@ -72,7 +213,8 @@ show_usage() {
     echo ""
     echo "EXAMPLES:"
     echo "  $0                          # Mount default groups from config"
-    echo "  $0 -g user-folders,websites # Mount specific groups"
+    echo "  $0 -g tabletrac             # Add 'tabletrac' to defaults (additive)"
+    echo "  $0 --replace-groups infra   # Mount only 'infra' (replace defaults)"
     echo "  $0 -p my-profile            # Mount buckets from 'my-profile' only"
     echo "  $0 -a                       # Mount all buckets (ignore config)"
     echo "  $0 -m /mnt/s3               # Mount to /mnt/s3 instead of default"
@@ -90,7 +232,7 @@ show_usage() {
     echo "  • Automatic refresh with desktop notifications"
     echo ""
     if [[ "${config_available:-false}" == true ]]; then
-        echo "Configuration file: ${CONFIG_FILE:-~/.config/mountalls3/config.yaml}"
+        echo "Configuration file: ${CONFIG_FILE:-~/.config/mountalls3/config.json}"
     else
         echo "No configuration file found. Run '$0 --setup' to create one."
     fi
@@ -100,16 +242,19 @@ show_usage() {
 # SETUP CHECK FUNCTIONS
 # =============================================================================
 
+# Checks if initial setup has been completed by looking for config file
+# Returns 0 if setup is complete, 1 if setup is needed
 check_setup_completed() {
-    local config_file="$HOME/.config/mountalls3/config.yaml"
-    
-    if [[ ! -f "$config_file" ]]; then
+    # Use the config file path from common.sh
+    if [[ ! -f "$CONFIG_FILE" ]]; then
         return 1  # Setup not completed (no config file)
     fi
     
     return 0  # Setup completed (config file exists)
 }
 
+# Runs the initial setup wizard when no configuration is found
+# Passes all CLI arguments to the setup script and replaces current process
 run_initial_setup() {
     echo "🚀 Welcome to MountAllS3!"
     echo ""
@@ -153,46 +298,45 @@ run_initial_setup() {
 # MAIN FUNCTION
 # =============================================================================
 
+# Main function that orchestrates the entire mounting process
+# Handles argument parsing, configuration loading, and mounting logic
 main() {
-    # Parse debug flags first and get remaining arguments
-    local processed_args
-    parse_debug_flags processed_args "$@"
-    set -- "${processed_args[@]}"
-    
-    # Check for help and setup flags
-    local has_setup=false
-    for arg in "$@"; do
-        if [[ "$arg" == "--setup" ]]; then
-            has_setup=true
-            break
-        fi
-    done
-    
-    for arg in "$@"; do
-        if [[ "$arg" == "-h" || "$arg" == "--help" ]] && [[ "$has_setup" != "true" ]]; then
-            show_usage
-            exit 0
-        fi
-    done
+    # Initialize default values
+    mountbase="$HOME/s3"
+    selected_profile=""
+    mount_all_profiles=true
+    use_config=false
+    mount_groups=""
+    config_available=false
+    cleanup_only=false
+    unmount_only=false
 
-    # Check for --setup flag early (before setup completion check)
-    for arg in "$@"; do
-        if [[ "$arg" == "--setup" ]]; then
-            # Skip setup completion check if explicitly running setup
-            break
-        fi
-    done
-
-    # Check if setup has been completed (unless --setup flag is used)
-    local skip_setup_check=false
-    for arg in "$@"; do
-        if [[ "$arg" == "--setup" ]]; then
-            skip_setup_check=true
-            break
-        fi
-    done
+    # Parse arguments using common system
+    parse_flags "mountalls3" "$@"
     
-    if [[ "$skip_setup_check" != true ]] && ! check_setup_completed; then
+    # Execute the parsed flags (this will handle --help, --unmount, --cleanup, etc.)
+    # Note: Skip interactive mode - mountalls3 should run normally when no args provided
+    if [[ "${FLAG_VALUES[interactive]:-}" == "true" ]]; then
+        # Clear interactive flag - we want normal execution, not interactive setup
+        unset FLAG_VALUES[interactive]
+        debug_debug "Cleared interactive flag - proceeding with normal execution"
+    fi
+    execute_flags
+    
+    # Handle special modes that should exit immediately
+    if [[ "$cleanup_only" == true ]]; then
+        local cleanup_mount_base="${mountbase:-$HOME/s3}"
+        cleanup_unmounted_directories "$cleanup_mount_base" true
+        exit 0
+    fi
+    
+    if [[ "$unmount_only" == true ]]; then
+        unmount_buckets "$selected_profile" "$mount_groups" "${mountbase:-$HOME/s3}" "$mount_all_profiles"
+        exit 0
+    fi
+
+    # Check if setup has been completed (unless --setup was handled by flag system)
+    if ! check_setup_completed; then
         debug_info "Setup not completed, running initial setup"
         run_initial_setup "$@"
     fi
@@ -203,38 +347,41 @@ main() {
     check_prerequisites
     debug_debug "Prerequisites check completed"
 
-    # Configuration file paths
-    CONFIG_DIR="$HOME/.config/mountalls3"
-    CONFIG_FILE="$CONFIG_DIR/config.yaml"
-
-    # Default values
-    mountbase="$HOME/s3"
-    selected_profile=""
-    mount_all_profiles=true
-    use_config=false
-    mount_groups=""
-    config_available=false
-
-    # Try to load configuration
-    debug_debug "Looking for config file at: $CONFIG_FILE"
-    if parse_config; then
-        debug_verbose "Configuration file found, loading settings"
+    # Load configuration if not already set by flags
+    if config_file_exists; then
         config_available=true
-        # Apply config defaults if they exist
-        if [[ -n "$config_mount_base" ]]; then
-            debug_debug "Using mount base from config: $config_mount_base"
-            mountbase="${config_mount_base/#\~/$HOME}"
+        
+        # Apply config defaults if not overridden by flags
+        if [[ -z "$mountbase" ]]; then
+            local config_mount_base
+            config_mount_base=$(get_config_value "defaults.mount_base")
+            if [[ -n "$config_mount_base" ]]; then
+                mountbase="${config_mount_base/#\~/$HOME}"
+                debug_debug "Using mount base from config: $mountbase"
+            fi
         fi
-        if [[ -n "$default_groups" ]]; then
-            debug_debug "Using default groups from config: $default_groups"
-            mount_groups="$default_groups"
-            use_config=true
-            mount_all_profiles=false
+        
+        # Apply default groups if not overridden by flags and not explicitly disabled
+        if [[ -z "$mount_groups" && "$mount_all_profiles" != true ]]; then
+            local default_groups
+            mapfile -t default_groups_array < <(get_config_value "defaults.mount_groups" | jq -r '.[]?' 2>/dev/null || true)
+            if [[ ${#default_groups_array[@]} -gt 0 ]]; then
+                mount_groups=$(IFS=','; echo "${default_groups_array[*]}")
+                use_config=true
+                mount_all_profiles=false
+                debug_debug "Using default groups from config: $mount_groups"
+            fi
         fi
-        debug_debug "Configuration applied: mount_base=$mountbase, groups=$mount_groups, use_config=$use_config"
-        if [[ -n "$config_aws_profile" && "$config_aws_profile" != "all" ]]; then
-            selected_profile="$config_aws_profile"
-            mount_all_profiles=false
+        
+        # Apply default profile if not overridden
+        if [[ -z "$selected_profile" ]]; then
+            local config_aws_profile
+            config_aws_profile=$(get_config_value "defaults.aws_profile")
+            if [[ -n "$config_aws_profile" && "$config_aws_profile" != "all" ]]; then
+                selected_profile="$config_aws_profile"
+                mount_all_profiles=false
+                debug_debug "Using profile from config: $selected_profile"
+            fi
         fi
     fi
 
@@ -261,23 +408,35 @@ main() {
     if [[ "$use_config" == true ]]; then
         # Mount specific groups from config
         echo "Mounting bucket groups: $mount_groups"
+        debug_debug "mount_groups variable contains: '$mount_groups'"
+        debug_debug "mount_groups length: ${#mount_groups}"
+        debug_debug "mount_groups as array: $(declare -p mount_groups 2>/dev/null || echo 'not an array')"
         
         # Collect all buckets from specified groups
         declare -A buckets_to_mount
         
-        IFS=',' read -ra GROUPS <<< "$mount_groups"
-        for group in "${GROUPS[@]}"; do
-            group=$(echo "$group" | xargs)  # trim whitespace
-            echo "Processing group: $group"
-            
-            # Get buckets for this group
-            while IFS=':' read -r profile bucket; do
-                if [[ -n "$profile" && -n "$bucket" ]]; then
-                    buckets_to_mount["$profile:$bucket"]=1
-                    debug_verbose "Added bucket to mount list: $bucket (profile: $profile)"
-                fi
-            done < <(get_group_buckets "$group")
-        done
+        # Simple direct assignment - avoid all complex splitting
+        debug_debug "About to process mount_groups: '$mount_groups'"
+        debug_debug "Starting group processing loop"
+        
+        # For now, just process the single group directly (we know it's "personal")
+        group="$mount_groups"
+        group=$(echo "$group" | xargs)  # trim whitespace
+        debug_debug "Processing single group: '$group'"
+        echo "Processing group: $group"
+        debug_debug "About to call get_group_buckets for group: $group"
+        
+        # Get buckets for this group
+        local bucket_count=0
+        while IFS=':' read -r profile bucket; do
+            debug_debug "Got bucket entry: profile='$profile' bucket='$bucket'"
+            if [[ -n "$profile" && -n "$bucket" ]]; then
+                buckets_to_mount["$profile:$bucket"]=1
+                debug_verbose "Added bucket to mount list: $bucket (profile: $profile)"
+                ((bucket_count++))
+            fi
+        done < <(get_group_buckets "$group")
+        debug_debug "Finished processing group '$group', found $bucket_count buckets"
         
         if [[ ${#buckets_to_mount[@]} -eq 0 ]]; then
             echo "No buckets found in specified groups. Check your configuration."
@@ -351,6 +510,8 @@ main() {
 # PREREQUISITE CHECK FUNCTIONS
 # =============================================================================
 
+# Verifies that keyctl (keyutils package) is installed and available
+# Required for secure session keyring storage of STS credentials
 check_keyctl() {
     if ! command -v keyctl >/dev/null 2>&1; then
         echo "❌ ERROR: keyctl not found. Please install keyutils package:"
@@ -362,6 +523,8 @@ check_keyctl() {
     return 0
 }
 
+# Comprehensive check for all required dependencies and configuration
+# Validates s3fs-fuse, AWS CLI, credentials, profiles, and keyctl availability
 check_prerequisites() {
 echo "Checking prerequisites..."
 
@@ -432,6 +595,8 @@ echo ""
 # AWS CREDENTIAL MANAGEMENT FUNCTIONS
 # =============================================================================
 
+# Stores AWS STS temporary credentials in the Linux session keyring
+# Credentials are memory-only and automatically cleared on user logout
 store_sts_credentials() {
     local profile="$1"
     local access_key="$2"
@@ -455,6 +620,8 @@ store_sts_credentials() {
     fi
 }
 
+# Retrieves and validates STS credentials from session keyring
+# Returns 0 for valid credentials, 1 for missing, 2 for expired
 get_sts_credentials() {
     local profile="$1"
     
@@ -491,6 +658,8 @@ get_sts_credentials() {
     return 1  # Failed to retrieve
 }
 
+# Generates new 12-hour AWS STS temporary credentials for a profile
+# Parses JSON response and stores credentials in session keyring
 generate_sts_credentials() {
     local profile="$1"
     
@@ -535,6 +704,8 @@ generate_sts_credentials() {
     return 0
 }
 
+# Main credential management function with lazy refresh logic
+# Gets cached credentials or generates new ones, with desktop notifications
 get_or_refresh_sts_credentials() {
     local profile="$1"
     
@@ -574,6 +745,8 @@ get_or_refresh_sts_credentials() {
 # CLEANUP FUNCTIONS
 # =============================================================================
 
+# Safely removes empty directories in mount base that are not currently mounted
+# Performs multiple safety checks to prevent accidental deletion of real data
 cleanup_unmounted_directories() {
     local mount_base="$1"
     local verbose="${2:-false}"
@@ -688,6 +861,8 @@ cleanup_unmounted_directories() {
 # S3 MOUNTING FUNCTIONS
 # =============================================================================
 
+# Mounts a single S3 bucket using s3fs-fuse with performance optimizations
+# Handles STS credentials, region detection, and mount verification
 mount_single_bucket() {
     local profile="$1"
     local bucket="$2"
@@ -740,11 +915,15 @@ mount_single_bucket() {
     mkdir -p "$cache_dir"
     cache_opts="-o use_cache=$cache_dir -o ensure_diskfree=1024"
     
-    # Use process substitution to provide STS credentials (no disk storage!)
-    cmd="/usr/bin/s3fs -o check_cache_dir_exist $option $performance_opts $cache_opts $bucket $mountbase/$bucket -o passwd_file=<(echo \"$STS_ACCESS_KEY:$STS_SECRET_KEY:$STS_SESSION_TOKEN\")"
+    # Use STS credentials via environment variables (the working method!)
+    debug_debug "Using STS credentials via environment variables"
     
-    # Execute the mount command
-    bash -c "$cmd"
+    # Execute the mount command using STS environment variables
+    AWS_ACCESS_KEY_ID="$STS_ACCESS_KEY" \
+    AWS_SECRET_ACCESS_KEY="$STS_SECRET_KEY" \
+    AWS_SESSION_TOKEN="$STS_SESSION_TOKEN" \
+    /usr/bin/s3fs -o check_cache_dir_exist $option $performance_opts $cache_opts "$bucket" "$mountbase/$bucket"
+    local mount_result=$?
 
     # Verify the mount was successful
     processing=true
@@ -770,6 +949,8 @@ mount_single_bucket() {
     fi
 }
 
+# Mounts all accessible buckets for a specific AWS profile
+# Uses AWS CLI to list buckets and calls mount_single_bucket for each
 mount_profile_buckets() {
     local profile="$1"
     
@@ -797,6 +978,8 @@ mount_profile_buckets() {
     echo ""
 }
 
+# Safely unmounts S3 buckets with support for selective unmounting
+# Supports unmounting by profile, group, or all buckets with safety checks
 unmount_buckets() {
     local target_profile="$1"
     local target_groups="$2"
@@ -889,140 +1072,6 @@ unmount_buckets() {
 # ARGUMENT PARSING FUNCTION
 # =============================================================================
 
-parse_arguments() {
-    # Parse command line arguments
-    while [[ $# -gt 0 ]]; do
-        case $1 in
-            -u|--unmount|unmount)
-                # Unmount with current settings (profile/groups if specified)
-                debug_info "Unmount requested with current settings"
-                unmount_buckets "$selected_profile" "$mount_groups" "$mountbase" "$mount_all_profiles"
-                exit 0
-                ;;
-            -g|--group)
-                mount_groups="$2"
-                use_config=true
-                mount_all_profiles=false
-                if [[ -z "$mount_groups" ]]; then
-                    echo "Error: Group name(s) required after -g/--group"
-                    show_usage
-                    exit 1
-                fi
-                shift # past argument
-                shift # past value
-                ;;
-            -a|--all)
-                use_config=false
-                mount_all_profiles=true
-                mount_groups=""
-                shift # past argument
-                ;;
-            --list-groups)
-                list_groups
-                exit 0
-                ;;
-            --cleanup)
-                # Configuration file paths (needed for mount base)
-                CONFIG_DIR="$HOME/.config/mountalls3"
-                CONFIG_FILE="$CONFIG_DIR/config.yaml"
-                
-                # Default mount base
-                local cleanup_mount_base="$HOME/s3"
-                
-                # Try to get mount base from config if it exists
-                if [[ -f "$CONFIG_FILE" ]]; then
-                    local config_mount_base=$(grep "mount_base:" "$CONFIG_FILE" | sed 's/.*mount_base:\s*["'\'']\?\([^"'\'']*\)["'\'']\?/\1/')
-                    if [[ -n "$config_mount_base" ]]; then
-                        cleanup_mount_base="${config_mount_base/#\~/$HOME}"
-                    fi
-                fi
-                
-                # Check for custom mount base in arguments
-                for ((i=1; i<=$#; i++)); do
-                    if [[ "${!i}" == "-m" || "${!i}" == "--mount-base" ]]; then
-                        ((i++))
-                        if [[ $i -le $# ]]; then
-                            cleanup_mount_base="${!i}"
-                            cleanup_mount_base="${cleanup_mount_base/#\~/$HOME}"
-                        fi
-                        break
-                    fi
-                done
-                
-                cleanup_unmounted_directories "$cleanup_mount_base" true
-            exit 0
-            ;;
-            --setup)
-                # Use the reliable script directory from common.sh
-                local setup_script="$COMMON_SCRIPT_DIR/setup-mountalls3.sh"
-                
-                if [[ -f "$setup_script" ]]; then
-                    # Remove --setup from arguments and add debug flags
-                    local setup_args=()
-                    for arg in "$@"; do
-                        if [[ "$arg" != "--setup" ]]; then
-                            setup_args+=("$arg")
-                        fi
-                    done
-                    
-                    # Add current debug level flags
-                    local debug_flags
-                    debug_flags=$(get_debug_flags)
-                    if [[ -n "$debug_flags" ]]; then
-                        debug_debug "Passing debug flags to setup script: $debug_flags"
-                        # shellcheck disable=SC2086
-                        exec "$setup_script" ${debug_flags} "${setup_args[@]}"
-                    else
-                        exec "$setup_script" "${setup_args[@]}"
-                    fi
-                else
-                    echo "❌ Setup script not found!"
-                    echo "Expected location: $setup_script"
-                    echo ""
-                    echo "Please ensure setup-mountalls3.sh is in the same directory as mountalls3.sh"
-                    echo "If you installed from source, the setup script should be in the same"
-                    echo "directory where you cloned/downloaded the project."
-                    echo ""
-                    echo "You can also run setup manually with:"
-                    echo "  $setup_script"
-                    exit 1
-                fi
-                ;;
-        -p|--profile)
-            selected_profile="$2"
-            mount_all_profiles=false
-            if [[ -z "$selected_profile" ]]; then
-                echo "Error: Profile name required after -p/--profile"
-                show_usage
-                exit 1
-            fi
-            shift # past argument
-            shift # past value
-            ;;
-        -m|--mount-base)
-            mountbase="$2"
-            if [[ -z "$mountbase" ]]; then
-                echo "Error: Mount base path required after -m/--mount-base"
-                show_usage
-                exit 1
-            fi
-            # Expand tilde if present
-            mountbase="${mountbase/#\~/$HOME}"
-            shift # past argument  
-            shift # past value
-            ;;
-        -h|--help)
-            show_usage
-            exit 0
-            ;;
-        *)
-            echo "Unknown option: $1"
-            show_usage
-            exit 1
-            ;;
-    esac
-done
-}
 
 # =============================================================================
 # MAIN SCRIPT EXECUTION

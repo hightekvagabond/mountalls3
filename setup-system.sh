@@ -5,8 +5,8 @@
 # =============================================================================
 
 # Load common functions
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/common.sh" || {
+COMMON_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$COMMON_SCRIPT_DIR/common.sh" || {
     echo "❌ Error: Could not load common.sh library"
     exit 1
 }
@@ -15,6 +15,8 @@ source "$SCRIPT_DIR/common.sh" || {
 AUTOSTART_DIR="$HOME/.config/autostart"
 AUTOSTART_FILE="$AUTOSTART_DIR/mountalls3.desktop"
 
+# Configures desktop environment autostart for MountAllS3
+# Creates .desktop file in ~/.config/autostart/ for automatic mounting on login
 configure_autostart() {
     local enable_autostart="$1"
     
@@ -38,6 +40,8 @@ configure_autostart() {
     fi
 }
 
+# Creates desktop autostart entry file for MountAllS3
+# Generates .desktop file that works with GNOME, KDE, XFCE, etc.
 create_autostart_entry() {
     # Create autostart directory if it doesn't exist
     mkdir -p "$AUTOSTART_DIR" || {
@@ -47,8 +51,8 @@ create_autostart_entry() {
     
     # Find the mountalls3 script location
     local mountalls3_path=""
-    if [[ -f "$SCRIPT_DIR/mountalls3.sh" ]]; then
-        mountalls3_path="$SCRIPT_DIR/mountalls3.sh"
+    if [[ -f "$COMMON_SCRIPT_DIR/mountalls3.sh" ]]; then
+        mountalls3_path="$COMMON_SCRIPT_DIR/mountalls3.sh"
     elif command -v mountalls3 >/dev/null 2>&1; then
         mountalls3_path="$(command -v mountalls3)"
     else
@@ -73,6 +77,8 @@ EOF
     print_info "MountAllS3 will now start automatically when you log in"
 }
 
+# Removes existing desktop autostart entry if it exists
+# Cleans up autostart configuration when disabled
 remove_autostart_entry() {
     if [[ -f "$AUTOSTART_FILE" ]]; then
         rm -f "$AUTOSTART_FILE"
@@ -82,6 +88,8 @@ remove_autostart_entry() {
     fi
 }
 
+# Configures command symlink for easy terminal access
+# Creates a symlink to mountalls3 in user's bin directory
 configure_symlinks() {
     local bin_dir="$1"
     
@@ -113,15 +121,23 @@ configure_symlinks() {
             default_bin="$HOME/bin"
         fi
         
-        configure_value "bin_dir" \
-            "Symlinks allow you to run 'mountalls3' and 'setup-mountalls3' from anywhere in your terminal." \
-            "Which directory should I use for symlinks?" \
-            "$default_bin"
+        echo "A symlink allows you to run 'mountalls3' from anywhere in your terminal."
+        echo ""
+        bin_dir=$(prompt_user "Which directory should I use for the symlink?" "$default_bin")
     fi
     
+    # Ensure bin_dir is set
+    if [[ -z "$bin_dir" ]]; then
+        print_error "Failed to determine bin directory. bin_dir='$bin_dir'"
+        return 1
+    fi
+    
+    debug_debug "Using bin directory: $bin_dir"
     create_symlinks "$bin_dir"
 }
 
+# Creates symlink for mountalls3 command
+# Handles directory creation and PATH updates as needed
 create_symlinks() {
     local target_dir="$1"
     
@@ -150,9 +166,9 @@ create_symlinks() {
         fi
     fi
     
-    # Create symlinks
-    local mountalls3_script="$SCRIPT_DIR/mountalls3.sh"
-    local setup_script="$SCRIPT_DIR/setup-mountalls3.sh"
+    # Create symlink for main script only
+    # (setup script can be accessed via: mountalls3 --setup)
+    local mountalls3_script="$COMMON_SCRIPT_DIR/mountalls3.sh"
     
     if [[ -f "$mountalls3_script" ]]; then
         ln -sf "$mountalls3_script" "$target_dir/mountalls3" || {
@@ -160,19 +176,17 @@ create_symlinks() {
             return 1
         }
         print_success "Created symlink: $target_dir/mountalls3 -> $mountalls3_script"
+        print_info "💡 Access setup via: mountalls3 --setup"
+    else
+        print_error "Main script not found: $mountalls3_script"
+        return 1
     fi
     
-    if [[ -f "$setup_script" ]]; then
-        ln -sf "$setup_script" "$target_dir/setup-mountalls3" || {
-            print_error "Failed to create symlink for setup-mountalls3"
-            return 1
-        }
-        print_success "Created symlink: $target_dir/setup-mountalls3 -> $setup_script"
-    fi
-    
-    print_info "You can now run 'mountalls3' and 'setup-mountalls3' from anywhere"
+    print_info "You can now run 'mountalls3' from anywhere"
 }
 
+# Adds specified directory to PATH in ~/.bashrc
+# Checks for existing entries to avoid duplicates
 add_to_bashrc_path() {
     local dir="$1"
     local bashrc="$HOME/.bashrc"
@@ -192,6 +206,8 @@ add_to_bashrc_path() {
     print_info "Restart your terminal or run: source ~/.bashrc"
 }
 
+# Configures system-level performance optimizations (requires root)
+# Checks for sudo privileges and prompts for optimization settings
 configure_system_optimizations() {
     print_header "System Performance Optimizations"
     
@@ -216,6 +232,8 @@ configure_system_optimizations() {
     fi
 }
 
+# Applies system-level optimizations for s3fs performance
+# Updates /etc/updatedb.conf to exclude s3fs from locate database
 apply_system_optimizations() {
     print_step "Applying system optimizations..."
     
@@ -239,6 +257,8 @@ apply_system_optimizations() {
     print_success "System optimizations applied"
 }
 
+# Main interactive setup function for system integration
+# Orchestrates autostart, symlinks, and system optimization setup
 interactive_setup() {
     print_header "System Integration Interactive Setup"
     
@@ -252,8 +272,8 @@ interactive_setup() {
     
     echo ""
     
-    # Step 2: Symlinks
-    if prompt_yes_no "Create command symlinks for easy access?" "y"; then
+    # Step 2: Symlink
+    if prompt_yes_no "Create command symlink for easy access?" "y"; then
         configure_symlinks
     fi
     
@@ -276,6 +296,8 @@ interactive_setup() {
     print_success "System integration setup completed!"
 }
 
+# Displays help information for the system integration setup script
+# Shows all available options and usage examples
 show_usage() {
     echo "MountAllS3 System Integration Setup"
     echo ""
@@ -283,7 +305,7 @@ show_usage() {
     echo ""
     echo "INTEGRATION OPTIONS:"
     echo "  --autostart [y/n]          Configure desktop autostart"
-    echo "  --symlinks [DIR]           Configure command symlinks"
+    echo "  --symlinks [DIR]           Configure command symlink"
     echo "  --system                   Configure system optimizations (requires sudo)"
     echo "  --interactive              Run interactive system setup"
     echo ""
@@ -292,10 +314,12 @@ show_usage() {
     echo ""
     echo "EXAMPLES:"
     echo "  $0 --autostart y           # Enable autostart non-interactively"
-    echo "  $0 --symlinks ~/.local/bin # Create symlinks in specific directory"
+    echo "  $0 --symlinks ~/.local/bin # Create symlink in specific directory"
     echo "  sudo $0 --system           # Apply system optimizations"
 }
 
+# Main function with simple argument parsing for system integration
+# Routes to appropriate functions based on command line arguments
 main() {
     case "${1:-}" in
         --help|-h)

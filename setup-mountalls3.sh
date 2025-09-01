@@ -17,18 +17,20 @@
 # =============================================================================
 
 # Load common functions
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/common.sh" || {
+COMMON_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$COMMON_SCRIPT_DIR/common.sh" || {
     echo "❌ Error: Could not load common.sh library"
     echo "Please ensure common.sh is in the same directory as this script"
     exit 1
 }
 
 # Setup modules
-SETUP_CONFIG="$SCRIPT_DIR/setup-config.sh"
-SETUP_GROUPS="$SCRIPT_DIR/setup-groups.sh"
-SETUP_SYSTEM="$SCRIPT_DIR/setup-system.sh"
+SETUP_CONFIG="$COMMON_SCRIPT_DIR/setup-config.sh"
+SETUP_GROUPS="$COMMON_SCRIPT_DIR/setup-groups.sh"
+SETUP_SYSTEM="$COMMON_SCRIPT_DIR/setup-system.sh"
 
+# Displays comprehensive help for the setup orchestrator
+# Shows all available options and examples for modular setup
 show_usage() {
     echo "MountAllS3 Interactive Setup"
     echo ""
@@ -74,6 +76,8 @@ show_usage() {
     echo "  • setup-system.sh   - System integration (autostart, symlinks, optimization)"
 }
 
+# Verifies that all required setup modules exist and are accessible
+# Returns error if any critical setup modules are missing
 check_modules() {
     local missing_modules=()
     
@@ -103,6 +107,8 @@ check_modules() {
     return 0
 }
 
+# Orchestrates the complete setup workflow by calling all modules
+# Runs basic config, groups, and optionally system integration
 run_full_setup() {
     print_header "MountAllS3 Complete Setup"
     echo "This wizard will guide you through configuring MountAllS3."
@@ -139,6 +145,8 @@ run_full_setup() {
     echo "  $0 --show-config          # Review your configuration"
 }
 
+# Displays current configuration in a formatted, human-readable way
+# Shows mount base, profiles, groups, and group descriptions
 show_current_config() {
     print_header "Current Configuration"
     
@@ -173,6 +181,8 @@ show_current_config() {
     fi
 }
 
+# Main orchestrator function that routes requests to appropriate modules
+# Handles argument parsing and delegates to specialized setup modules
 main() {
     # Parse debug flags first and get remaining arguments
     local processed_args
