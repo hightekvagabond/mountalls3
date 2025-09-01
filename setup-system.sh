@@ -313,15 +313,17 @@ check_logs_for_s3fs_issues() {
         fi
     done
     
-    # Check systemd journal if available
+    # Check systemd journal if available (limited scope for performance)
     if command -v journalctl >/dev/null 2>&1; then
-        echo -n "   Checking systemd journal (last 7 days)... "
+        echo -n "   Checking systemd journal (last 24 hours)... "
         local found_in_journal=0
+        # Use timeout to prevent hanging and limit to recent entries for performance
         for pattern in "${issue_patterns[@]}"; do
-            if journalctl --since "7 days ago" | grep -i "$pattern" >/dev/null 2>&1; then
+            if timeout 10s journalctl --since "1 day ago" --lines=1000 | grep -i "$pattern" >/dev/null 2>&1; then
                 echo "Found s3fs issue pattern '$pattern' in systemd journal" >> "$temp_log"
                 issues_found=1
                 found_in_journal=1
+                break  # Found one issue, no need to check more patterns
             fi
         done
         if [[ $found_in_journal -eq 1 ]]; then
@@ -392,9 +394,9 @@ check_logs_for_io_issues() {
     echo "🔍 Analyzing logs for I/O performance issues..."
     
     if command -v journalctl >/dev/null 2>&1; then
-        echo -n "   Checking systemd journal for I/O issues (last 7 days)... "
+        echo -n "   Checking systemd journal for I/O issues (last 24 hours)... "
         for pattern in "${io_patterns[@]}"; do
-            if journalctl --since "7 days ago" | grep -i "$pattern" | grep -q fuse; then
+            if timeout 10s journalctl --since "1 day ago" --lines=1000 | grep -i "$pattern" | grep -q fuse; then
                 echo "⚠️  I/O issues found"
                 debug_debug "Found I/O issue related to fuse: $pattern"
                 return 0
@@ -418,6 +420,8 @@ apply_optimization_updatedb() {
     local force_apply="${1:-false}"
     
     print_header "UpdateDB Optimization (Exclude s3fs from locate database)"
+    echo "🟢 RISK LEVEL: SAFE - Recommended for all users"
+    echo ""
     
     # Check if already applied
     local updatedb_conf="/etc/updatedb.conf"
@@ -471,6 +475,8 @@ apply_optimization_file_limits() {
     local force_apply="${1:-false}"
     
     print_header "File Descriptor Limit Optimization"
+    echo "🟢 RISK LEVEL: SAFE - Recommended for all users"
+    echo ""
     
     # Check current limits
     local current_soft=$(ulimit -Sn)
@@ -560,6 +566,8 @@ apply_optimization_network_buffers() {
     local force_apply="${1:-false}"
     
     print_header "Network Buffer Optimization"
+    echo "🟡 RISK LEVEL: MODERATE - For high-throughput workloads"
+    echo ""
     
     # Check if already applied
     if grep -q "# MountAllS3 network optimizations" /etc/sysctl.conf 2>/dev/null; then
