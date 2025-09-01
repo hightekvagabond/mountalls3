@@ -425,9 +425,9 @@ apply_optimization_updatedb() {
     
     # Check if already applied
     local updatedb_conf="/etc/updatedb.conf"
+    local already_applied=false
     if [[ -f "$updatedb_conf" ]] && grep -q '^[[:space:]]*PRUNEFS="[^"]*fuse\.s3fs[^"]*"' "$updatedb_conf"; then
-        print_info "✅ UpdateDB optimization already applied - skipping"
-        return 1  # Return 1 to indicate "not newly applied"
+        already_applied=true
     fi
     
     # Explain what this optimization does
@@ -457,6 +457,12 @@ apply_optimization_updatedb() {
     echo "  sudo updatedb  # Rebuild locate database"
     echo ""
     
+    if [[ "$already_applied" == true ]]; then
+        print_info "✅ UpdateDB optimization already applied"
+        print_info "💡 This information is shown for reference and troubleshooting"
+        return 1  # Return 1 to indicate "not newly applied"
+    fi
+    
     if [[ "$force_apply" != true ]]; then
         if ! prompt_yes_no "Apply updatedb optimization now?" "y"; then
             print_info "Skipped updatedb optimization (you can run this again later if needed)"
@@ -483,16 +489,14 @@ apply_optimization_file_limits() {
     local current_hard=$(ulimit -Hn)
     
     # Check if already optimized
+    local already_applied=false
+    local already_effective=false
     if [[ $current_soft -ge 65536 ]]; then
-        print_info "✅ File descriptor limits already optimized (current: $current_soft) - skipping"
-        return 1  # Return 1 to indicate "not newly applied"
-    fi
-    
-    # Check if we've already modified limits.conf
-    if grep -q "# MountAllS3 file descriptor limits" /etc/security/limits.conf 2>/dev/null; then
-        print_info "✅ File descriptor limit configuration already applied - skipping"
-        print_warning "Current limit is still $current_soft - you may need to restart your session"
-        return 1  # Return 1 to indicate "not newly applied"
+        already_applied=true
+        already_effective=true
+    elif grep -q "# MountAllS3 file descriptor limits" /etc/security/limits.conf 2>/dev/null; then
+        already_applied=true
+        already_effective=false
     fi
     
     # Explain what this optimization does
@@ -522,6 +526,17 @@ apply_optimization_file_limits() {
     echo ""
     echo "ℹ️  This is a safe optimization that only increases limits (never decreases them)"
     echo ""
+    
+    if [[ "$already_applied" == true ]]; then
+        if [[ "$already_effective" == true ]]; then
+            print_info "✅ File descriptor limits already optimized and effective (current: $current_soft)"
+        else
+            print_info "✅ File descriptor limit configuration already applied"
+            print_warning "Current limit is still $current_soft - you may need to restart your session"
+        fi
+        print_info "💡 This information is shown for reference and troubleshooting"
+        return 1  # Return 1 to indicate "not newly applied"
+    fi
     
     if [[ "$force_apply" != true ]]; then
         if ! prompt_yes_no "Apply file descriptor limit optimizations?" "y"; then
@@ -570,9 +585,9 @@ apply_optimization_network_buffers() {
     echo ""
     
     # Check if already applied
+    local already_applied=false
     if grep -q "# MountAllS3 network optimizations" /etc/sysctl.conf 2>/dev/null; then
-        print_info "✅ Network buffer optimizations already applied - skipping"
-        return 1  # Return 1 to indicate "not newly applied"
+        already_applied=true
     fi
     
     # Check logs for network issues
@@ -611,6 +626,12 @@ apply_optimization_network_buffers() {
     echo "  sudo cp /etc/sysctl.conf.backup.* /etc/sysctl.conf"
     echo "  sudo sysctl -p  # Or edit /etc/sysctl.conf and remove MountAllS3 network section"
     echo ""
+    
+    if [[ "$already_applied" == true ]]; then
+        print_info "✅ Network buffer optimizations already applied"
+        print_info "💡 This information is shown for reference and troubleshooting"
+        return 1  # Return 1 to indicate "not newly applied"
+    fi
     
     if [[ "$force_apply" != true ]]; then
         if ! prompt_yes_no "Apply network buffer optimizations?" "n"; then
