@@ -35,8 +35,8 @@ MOUNTALLS3_COMMON_LOADED=true
 COMMON_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MOUNTALLS3_SCRIPT="$COMMON_SCRIPT_DIR/mountalls3.sh"
 CONFIG_DIR="$HOME/.config/mountalls3"
-CONFIG_FILE="$CONFIG_DIR/config.yaml"
-CONFIG_EXAMPLE="$COMMON_SCRIPT_DIR/config-example.yaml"
+CONFIG_FILE="$CONFIG_DIR/config.json"
+CONFIG_EXAMPLE="$COMMON_SCRIPT_DIR/config-example.json"
 
 # Colors for output
 RED='\033[0;31m'
@@ -47,6 +47,84 @@ PURPLE='\033[0;35m'
 CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m' # No Color
+
+# =============================================================================
+# DEBUG SYSTEM
+# =============================================================================
+
+# Debug levels: 0=silent, 1=info, 2=verbose, 3=debug
+DEBUG_LEVEL=${DEBUG_LEVEL:-0}
+
+debug_log() {
+    local level="$1"
+    local message="$2"
+    local timestamp=$(date '+%H:%M:%S')
+    
+    if [[ $DEBUG_LEVEL -ge $level ]]; then
+        case $level in
+            1) echo "ℹ️  [$timestamp] $message" >&2 ;;
+            2) echo "🔍 [$timestamp] $message" >&2 ;;
+            3) echo "🐛 [$timestamp] DEBUG: $message" >&2 ;;
+            *) echo "   [$timestamp] $message" >&2 ;;
+        esac
+    fi
+}
+
+# Convenience functions
+debug_info() { debug_log 1 "$1"; }
+debug_verbose() { debug_log 2 "$1"; }
+debug_debug() { debug_log 3 "$1"; }
+
+# Function to set debug level (can be called from other scripts)
+set_debug_level() {
+    local level="$1"
+    export DEBUG_LEVEL="$level"
+    debug_debug "Debug level set to: $DEBUG_LEVEL"
+}
+
+# Function to parse debug flags and return remaining args
+parse_debug_flags() {
+    local -n remaining_args=$1
+    shift
+    
+    remaining_args=()
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -v|--verbose)
+                set_debug_level 2
+                debug_verbose "Verbose mode enabled"
+                ;;
+            -d|--debug)
+                set_debug_level 3
+                debug_debug "Debug mode enabled"
+                ;;
+            --debug-level)
+                if [[ -n "$2" && "$2" =~ ^[0-3]$ ]]; then
+                    set_debug_level "$2"
+                    shift
+                else
+                    echo "Error: --debug-level requires a number 0-3" >&2
+                    return 1
+                fi
+                ;;
+            *)
+                remaining_args+=("$1")
+                ;;
+        esac
+        shift
+    done
+}
+
+# Function to get debug flags for passing to other scripts
+get_debug_flags() {
+    case $DEBUG_LEVEL in
+        0) echo "" ;;
+        1) echo "--debug-level 1" ;;
+        2) echo "--verbose" ;;
+        3) echo "--debug" ;;
+        *) echo "--debug-level $DEBUG_LEVEL" ;;
+    esac
+}
 
 # Configuration cache (to avoid re-reading)
 declare -A CONFIG_CACHE
@@ -286,25 +364,11 @@ get_config_value() {
         return 1
     fi
     
-    # Simple YAML parser for basic key: value pairs
+    # Use jq to extract the value
     local value
-    case "$key" in
-        "defaults.mount_base")
-            value=$(grep -E "^\s*mount_base:" "$CONFIG_FILE" | head -1 | sed 's/.*mount_base:\s*["'\'']\?\([^"'\'']*\)["'\'']\?.*/\1/')
-            ;;
-        "defaults.aws_profile")
-            value=$(grep -E "^\s*aws_profile:" "$CONFIG_FILE" | head -1 | sed 's/.*aws_profile:\s*["'\'']\?\([^"'\'']*\)["'\'']\?.*/\1/')
-            ;;
-        "defaults.mount_groups")
-            value=$(grep -E "^\s*mount_groups:" "$CONFIG_FILE" | head -1 | sed 's/.*mount_groups:\s*\(.*\)/\1/')
-            ;;
-        *)
-            # Generic key lookup
-            value=$(grep -E "^\s*${key##*.}:" "$CONFIG_FILE" | head -1 | sed 's/.*:\s*["'\'']\?\([^"'\'']*\)["'\'']\?.*/\1/')
-            ;;
-    esac
+    value=$(jq -r ".$key // empty" "$CONFIG_FILE" 2>/dev/null)
     
-    if [[ -n "$value" ]]; then
+    if [[ -n "$value" && "$value" != "null" ]]; then
         echo "$value"
     else
         echo "$default"
@@ -316,11 +380,8 @@ get_config_groups() {
         return 1
     fi
     
-    # Extract group names from config file
-    grep -E "^\s*[a-zA-Z0-9_-]+:" "$CONFIG_FILE" | \
-        grep -v -E "^\s*(defaults|mount_base|aws_profile|mount_groups|description|buckets|profile|bucket):" | \
-        sed 's/^\s*\([^:]*\):.*/\1/' | \
-        sort -u
+    # Extract group names using jq
+    jq -r '.groups | keys[]' "$CONFIG_FILE" 2>/dev/null
 }
 
 get_group_description() {
@@ -330,8 +391,8 @@ get_group_description() {
         return 1
     fi
     
-    # Find the group and extract its description
-    awk "/^\s*${group}:/{flag=1; next} /^\s*[a-zA-Z0-9_-]+:/{flag=0} flag && /description:/{gsub(/.*description:\s*[\"'\'']\?/, \"\"); gsub(/[\"'\'']\s*$/, \"\"); print; exit}" "$CONFIG_FILE"
+    # Extract group description using jq
+    jq -r ".groups[\"$group\"].description // empty" "$CONFIG_FILE" 2>/dev/null
 }
 
 get_group_buckets() {
@@ -341,13 +402,76 @@ get_group_buckets() {
         return 1
     fi
     
-    # Extract buckets for a specific group
-    awk "
-    /^\s*${group}:/{in_group=1; next}
-    /^\s*[a-zA-Z0-9_-]+:/ && in_group {in_group=0}
-    in_group && /- profile:/ {profile=\$NF; gsub(/[\"'\''\"'\'']/,\"\",profile)}
-    in_group && /bucket:/ {bucket=\$NF; gsub(/[\"'\''\"'\'']/,\"\",bucket); print profile\":\"bucket}
-    " "$CONFIG_FILE"
+    # Extract buckets for a specific group using jq
+    jq -r ".groups[\"$group\"].buckets[]? | \"\(.profile):\(.bucket)\"" "$CONFIG_FILE" 2>/dev/null
+}
+
+parse_config() {
+    if [[ ! -f "$CONFIG_FILE" ]]; then
+        echo "No config file found at $CONFIG_FILE"
+        echo "Creating example config directory..."
+        mkdir -p "$CONFIG_DIR"
+        if [[ -f "$(dirname "${BASH_SOURCE[0]}")/config-example.json" ]]; then
+            cp "$(dirname "${BASH_SOURCE[0]}")/config-example.json" "$CONFIG_DIR/"
+            echo "Example config copied to $CONFIG_DIR/config-example.json"
+            echo "Please copy and customize it to $CONFIG_FILE"
+        fi
+        return 1
+    fi
+    
+    # Read default mount groups from config
+    default_groups=$(jq -r '.defaults.mount_groups[]?' "$CONFIG_FILE" 2>/dev/null | tr '\n' ',' | sed 's/,$//')
+    
+    # Read default mount base from config  
+    config_mount_base=$(jq -r '.defaults.mount_base // empty' "$CONFIG_FILE" 2>/dev/null)
+    
+    # Read default AWS profile from config
+    config_aws_profile=$(jq -r '.defaults.aws_profile // empty' "$CONFIG_FILE" 2>/dev/null)
+    
+    return 0
+}
+
+list_groups() {
+    if [[ ! -f "$CONFIG_FILE" ]]; then
+        echo "No configuration file found at $CONFIG_FILE"
+        echo "Run 'mountalls3 --setup' to create one."
+        return 1
+    fi
+    
+    echo "Available bucket groups:"
+    echo ""
+    
+    # Extract group names and descriptions using jq
+    local groups
+    mapfile -t groups < <(jq -r '.groups | keys[]' "$CONFIG_FILE" 2>/dev/null)
+    
+    if [[ ${#groups[@]} -eq 0 ]]; then
+        echo "  No groups configured"
+        return 0
+    fi
+    
+    for group in "${groups[@]}"; do
+        local description
+        description=$(jq -r ".groups[\"$group\"].description // \"No description\"" "$CONFIG_FILE" 2>/dev/null)
+        local bucket_count
+        bucket_count=$(jq -r ".groups[\"$group\"].buckets | length" "$CONFIG_FILE" 2>/dev/null)
+        
+        echo "  🗂️  $group - $description"
+        echo "     📦 $bucket_count bucket(s)"
+        
+        # Show first few buckets as examples
+        local buckets
+        mapfile -t buckets < <(jq -r ".groups[\"$group\"].buckets[0:3][]? | \"\(.profile):\(.bucket)\"" "$CONFIG_FILE" 2>/dev/null)
+        
+        for bucket in "${buckets[@]}"; do
+            echo "       • $bucket"
+        done
+        
+        if [[ $bucket_count -gt 3 ]]; then
+            echo "       ... and $((bucket_count - 3)) more"
+        fi
+        echo ""
+    done
 }
 
 validate_config_file() {
@@ -513,6 +637,18 @@ validate_group_name() {
 # UTILITY FUNCTIONS
 # =============================================================================
 
+check_jq() {
+    if ! command -v jq &> /dev/null; then
+        print_error "jq is required but not installed."
+        print_error "Please install jq:"
+        print_error "  Ubuntu/Debian: sudo apt install jq"
+        print_error "  RHEL/CentOS:   sudo yum install jq"
+        print_error "  macOS:         brew install jq"
+        return 1
+    fi
+    return 0
+}
+
 get_default_mount_base() {
     # Try to get default from example config
     local example_default="~/s3"
@@ -605,6 +741,13 @@ register_flag() {
 parse_flags() {
     local script_name="$1"
     shift
+    
+    # Parse debug flags first and update remaining args
+    local processed_args
+    parse_debug_flags processed_args "$@"
+    set -- "${processed_args[@]}"
+    
+    debug_debug "Parsing flags for $script_name with args: $*"
     
     # Handle help first
     for arg in "$@"; do

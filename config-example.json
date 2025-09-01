@@ -1,0 +1,53 @@
+{
+  "_comment": "MountAllS3 Configuration File",
+  "_info": "This file should be placed at: ~/.config/mountalls3/config.json",
+  "_usage": "Copy this example and customize it for your needs",
+  
+  "defaults": {
+    "mount_groups": ["user-folders"],
+    "mount_base": "~/s3",
+    "aws_profile": "all"
+  },
+  
+  "groups": {
+    "user-folders": {
+      "description": "Personal user folders and data",
+      "buckets": [
+        {"profile": "personal", "bucket": "my-personal-files"},
+        {"profile": "personal", "bucket": "my-photos"},
+        {"profile": "work", "bucket": "user-documents"}
+      ]
+    },
+    "websites": {
+      "description": "Website assets and static files", 
+      "buckets": [
+        {"profile": "production", "bucket": "company-website-assets"},
+        {"profile": "development", "bucket": "dev-website-files"},
+        {"profile": "personal", "bucket": "personal-blog-assets"}
+      ]
+    },
+    "infra": {
+      "description": "Infrastructure backups and logs",
+      "buckets": [
+        {"profile": "production", "bucket": "prod-backups"},
+        {"profile": "production", "bucket": "infrastructure-logs"},
+        {"profile": "development", "bucket": "dev-environment-backups"}
+      ]
+    }
+  },
+  
+  "performance": {
+    "enable_cache": true,
+    "cache_directory": "~/.cache/s3fs",
+    "ensure_diskfree_mb": 1024,
+    "multireq_max": 20,
+    "parallel_count": 5
+  },
+  
+  "exclusions": {
+    "buckets": [
+      "massive-data-warehouse",
+      "temp-processing-bucket"
+    ]
+  }
+}

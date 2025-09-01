@@ -12,6 +12,7 @@
 #   - s3fs-fuse: FUSE-based S3 filesystem
 #   - keyutils: Linux session keyring support  
 #   - AWS CLI: Amazon Web Services command line interface
+#   - jq: JSON processor for configuration parsing
 #   - Configured AWS profiles with appropriate S3 permissions
 #
 # SECURITY:
@@ -25,31 +26,14 @@
 # =============================================================================
 
 # =============================================================================
-# DEBUG SYSTEM
+# INITIALIZATION AND COMMON FUNCTIONS
 # =============================================================================
 
-# Debug levels: 0=silent, 1=info, 2=verbose, 3=debug
-DEBUG_LEVEL=0
+# Source common functions and config handling
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/common.sh"
 
-debug_log() {
-    local level="$1"
-    local message="$2"
-    local timestamp=$(date '+%H:%M:%S')
-    
-    if [[ $DEBUG_LEVEL -ge $level ]]; then
-        case $level in
-            1) echo "ℹ️  [$timestamp] $message" >&2 ;;
-            2) echo "🔍 [$timestamp] $message" >&2 ;;
-            3) echo "🐛 [$timestamp] DEBUG: $message" >&2 ;;
-            *) echo "   [$timestamp] $message" >&2 ;;
-        esac
-    fi
-}
 
-# Convenience functions
-debug_info() { debug_log 1 "$1"; }
-debug_verbose() { debug_log 2 "$1"; }
-debug_debug() { debug_log 3 "$1"; }
 
 # =============================================================================
 # USER HELP FUNCTION
@@ -178,8 +162,12 @@ run_initial_setup() {
 # =============================================================================
 
 main() {
-    # Check for help and debug flags early, before prerequisites
-    # But skip help if --setup is also present (let setup handle it)
+    # Parse debug flags first and get remaining arguments
+    local processed_args
+    parse_debug_flags processed_args "$@"
+    set -- "${processed_args[@]}"
+    
+    # Check for help and setup flags
     local has_setup=false
     for arg in "$@"; do
         if [[ "$arg" == "--setup" ]]; then
@@ -192,12 +180,6 @@ main() {
         if [[ "$arg" == "-h" || "$arg" == "--help" ]] && [[ "$has_setup" != "true" ]]; then
             show_usage
             exit 0
-        elif [[ "$arg" == "-v" || "$arg" == "--verbose" ]]; then
-            DEBUG_LEVEL=2
-            debug_verbose "Verbose mode enabled"
-        elif [[ "$arg" == "-d" || "$arg" == "--debug" ]]; then
-            DEBUG_LEVEL=3
-            debug_debug "Debug mode enabled"
         fi
     done
 
@@ -264,8 +246,15 @@ main() {
         fi
     fi
 
-    # Parse command line arguments
-    parse_arguments "$@"
+    # Check prerequisites
+    echo "Checking prerequisites..."
+    if ! check_jq; then
+        exit 1
+    fi
+    echo "✅ All prerequisites satisfied!"
+    echo ""
+
+    # Command line arguments are handled inline later in the function
 
     # Create the mount base directory if it doesn't exist
     if [ ! -d "$mountbase" ]; then
@@ -293,7 +282,7 @@ main() {
             while IFS=':' read -r profile bucket; do
                 if [[ -n "$profile" && -n "$bucket" ]]; then
                     buckets_to_mount["$profile:$bucket"]=1
-                    echo "  Added: $bucket (profile: $profile)"
+                    debug_verbose "Added bucket to mount list: $bucket (profile: $profile)"
                 fi
             done < <(get_group_buckets "$group")
         done
@@ -313,8 +302,8 @@ main() {
                 continue
             fi
             
-            echo ""
-            echo "Mounting bucket: $bucket (profile: $profile)"
+            debug_info ""
+            debug_info "Mounting bucket: $bucket (profile: $profile)"
             mount_single_bucket "$profile" "$bucket"
         done
         
@@ -326,13 +315,13 @@ main() {
             aws configure list-profiles | sed 's/^/  /'
             exit 1
         fi
-        echo "Mounting buckets from profile: $selected_profile"
+        debug_info "Mounting buckets from profile: $selected_profile"
         mount_profile_buckets "$selected_profile"
         
     else
         # Mount all buckets from all profiles (original behavior)
         profiles=$(aws configure list-profiles)
-        echo "Mounting buckets from all AWS profiles"
+        debug_info "Mounting buckets from all AWS profiles"
         
         for profile in $profiles; do
             mount_profile_buckets "$profile"
@@ -362,7 +351,7 @@ main() {
     echo "==================================="
     
     # Automatic cleanup of empty unmounted directories
-    echo ""
+    debug_info ""
     cleanup_unmounted_directories "$mountbase" false
 }
 
@@ -585,104 +574,9 @@ get_or_refresh_sts_credentials() {
     esac
 }
 
-# =============================================================================
-# CONFIGURATION MANAGEMENT FUNCTIONS
-# =============================================================================
 
-parse_config() {
-    if [[ ! -f "$CONFIG_FILE" ]]; then
-        echo "No config file found at $CONFIG_FILE"
-        echo "Creating example config directory..."
-        mkdir -p "$CONFIG_DIR"
-        if [[ -f "$(dirname "$0")/config-example.yaml" ]]; then
-            cp "$(dirname "$0")/config-example.yaml" "$CONFIG_DIR/"
-            echo "Example config copied to $CONFIG_DIR/config-example.yaml"
-            echo "Please copy and customize it to $CONFIG_FILE"
-        fi
-        return 1
-    fi
-    
-    # Read default mount groups from config
-    default_groups=$(grep -A 5 "mount_groups:" "$CONFIG_FILE" | grep -E '^\s*-\s*' | sed 's/^\s*-\s*["'\'']\?\([^"'\'']*\)["'\'']\?/\1/' | tr '\n' ',' | sed 's/,$//')
-    
-    # Read default mount base from config  
-    config_mount_base=$(grep "mount_base:" "$CONFIG_FILE" | sed 's/.*mount_base:\s*["'\'']\?\([^"'\'']*\)["'\'']\?/\1/')
-    
-    # Read default AWS profile from config
-    config_aws_profile=$(grep "aws_profile:" "$CONFIG_FILE" | sed 's/.*aws_profile:\s*["'\'']\?\([^"'\'']*\)["'\'']\?/\1/')
-    
-    return 0
-}
 
-get_group_buckets() {
-    local group_name="$1"
-    
-    if [[ ! -f "$CONFIG_FILE" ]]; then
-        echo "Config file not found"
-        return 1
-    fi
-    
-    # Extract the group section and parse buckets
-    awk -v group="$group_name" '
-    BEGIN { in_group = 0; in_buckets = 0 }
-    $0 ~ "^\\s*" group ":" { in_group = 1; next }
-    in_group && /^[[:space:]]*[a-zA-Z]/ && !/^[[:space:]]*buckets:/ && !/^[[:space:]]*description:/ { in_group = 0 }
-    in_group && /^[[:space:]]*buckets:/ { in_buckets = 1; next }
-    in_buckets && /^[[:space:]]*-/ {
-        profile = ""
-        bucket = ""
-    }
-    in_buckets && /^[[:space:]]*-/ { getline }
-    in_buckets && /profile:/ { 
-        gsub(/.*profile:[[:space:]]*["'\'']*/, "")
-        gsub(/["'\'']*$/, "")
-        profile = $0
-    }
-    in_buckets && /bucket:/ {
-        gsub(/.*bucket:[[:space:]]*["'\'']*/, "")
-        gsub(/["'\'']*$/, "")
-        bucket = $0
-        if (profile && bucket) print profile ":" bucket
-    }
-    in_buckets && /^[[:space:]]*[a-zA-Z]/ && !/^[[:space:]]*-/ && !/profile:/ && !/bucket:/ { in_buckets = 0; in_group = 0 }
-    ' "$CONFIG_FILE"
-}
 
-list_groups() {
-    if [[ ! -f "$CONFIG_FILE" ]]; then
-        echo "No configuration file found at $CONFIG_FILE"
-        echo "Run '$0 --setup' to create one."
-        return 1
-    fi
-    
-    echo "Available bucket groups:"
-    echo ""
-    
-    # Extract group names and descriptions
-    awk '
-    /^[[:space:]]*[a-zA-Z-]+:/ && !/^[[:space:]]*defaults:/ && !/^[[:space:]]*groups:/ && !/^[[:space:]]*performance:/ && !/^[[:space:]]*exclude_buckets:/ {
-        gsub(/:$/, "")
-        gsub(/^[[:space:]]*/, "")
-        current_group = $0
-        in_group = 1
-        next
-    }
-    in_group && /description:/ {
-        gsub(/.*description:[[:space:]]*["'\'']*/, "")
-        gsub(/["'\'']*$/, "")
-        printf "  %s: %s\n", current_group, $0
-        in_group = 0
-    }
-    in_group && /^[[:space:]]*[a-zA-Z]/ && !/description:/ && !/buckets:/ {
-        in_group = 0
-    }
-    ' "$CONFIG_FILE"
-    
-    echo ""
-    echo "Usage examples:"
-    echo "  $0 -g user-folders              # Mount single group"
-    echo "  $0 -g user-folders,websites     # Mount multiple groups"
-}
 
 # =============================================================================
 # CLEANUP FUNCTIONS
@@ -744,7 +638,7 @@ cleanup_unmounted_directories() {
         
         if [[ "$is_mounted" == true ]]; then
             if [[ "$verbose" == true ]]; then
-                echo "   Skipping $dir_name (currently mounted)"
+                debug_verbose "   Skipping $dir_name (currently mounted)"
             fi
             ((skipped_count++))
             continue
@@ -753,7 +647,7 @@ cleanup_unmounted_directories() {
         # Check if directory is truly empty
         if [[ -n "$(ls -A "$dir" 2>/dev/null)" ]]; then
             if [[ "$verbose" == true ]]; then
-                echo "   Skipping $dir_name (contains files or directories)"
+                debug_verbose "   Skipping $dir_name (contains files or directories)"
             fi
             ((skipped_count++))
             continue
@@ -762,7 +656,7 @@ cleanup_unmounted_directories() {
         # Additional safety check: verify it's not a mountpoint
         if mountpoint -q "$dir" 2>/dev/null; then
             if [[ "$verbose" == true ]]; then
-                echo "   Skipping $dir_name (is a mountpoint)"
+                debug_verbose "   Skipping $dir_name (is a mountpoint)"
             fi
             ((skipped_count++))
             continue
@@ -771,7 +665,7 @@ cleanup_unmounted_directories() {
         # Safety check: ensure we're only operating within mount_base
         if [[ "$dir" != "$mount_base"/* ]]; then
             if [[ "$verbose" == true ]]; then
-                echo "   Skipping $dir_name (outside mount base)"
+                debug_verbose "   Skipping $dir_name (outside mount base)"
             fi
             ((skipped_count++))
             continue
@@ -780,12 +674,12 @@ cleanup_unmounted_directories() {
         # Safe to remove empty directory
         if rmdir "$dir" 2>/dev/null; then
             if [[ "$verbose" == true ]]; then
-                echo "   ✓ Removed empty directory: $dir_name"
+                debug_verbose "   ✓ Removed empty directory: $dir_name"
             fi
             ((cleaned_count++))
         else
             if [[ "$verbose" == true ]]; then
-                echo "   ⚠️  Failed to remove $dir_name (may not be empty or permission issue)"
+                debug_verbose "   ⚠️  Failed to remove $dir_name (may not be empty or permission issue)"
             fi
             ((skipped_count++))
         fi
@@ -1087,14 +981,24 @@ parse_arguments() {
                 fi
                 
                 if [[ -n "$setup_script" ]]; then
-                    # Remove --setup from arguments before passing to setup script
+                    # Remove --setup from arguments and add debug flags
                     local setup_args=()
                     for arg in "$@"; do
                         if [[ "$arg" != "--setup" ]]; then
                             setup_args+=("$arg")
                         fi
                     done
-                    exec "$setup_script" "${setup_args[@]}"
+                    
+                    # Add current debug level flags
+                    local debug_flags
+                    debug_flags=$(get_debug_flags)
+                    if [[ -n "$debug_flags" ]]; then
+                        debug_debug "Passing debug flags to setup script: $debug_flags"
+                        # shellcheck disable=SC2086
+                        exec "$setup_script" ${debug_flags} "${setup_args[@]}"
+                    else
+                        exec "$setup_script" "${setup_args[@]}"
+                    fi
                 else
                     echo "❌ Setup script not found!"
                     echo ""

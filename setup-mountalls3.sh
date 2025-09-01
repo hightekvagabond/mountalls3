@@ -174,6 +174,13 @@ show_current_config() {
 }
 
 main() {
+    # Parse debug flags first and get remaining arguments
+    local processed_args
+    parse_debug_flags processed_args "$@"
+    set -- "${processed_args[@]}"
+    
+    debug_debug "Setup orchestrator started with args: $*"
+    
     # Parse arguments
     local run_full=true
     
@@ -185,47 +192,65 @@ main() {
                 ;;
             --mount-location)
                 run_full=false
-                check_modules && "$SETUP_CONFIG" --mount-location
+                local debug_flags=$(get_debug_flags)
+                # shellcheck disable=SC2086
+                check_modules && "$SETUP_CONFIG" $debug_flags --mount-location
                 exit $?
                 ;;
             --profiles)
                 run_full=false
-                check_modules && "$SETUP_CONFIG" --profiles
+                local debug_flags=$(get_debug_flags)
+                # shellcheck disable=SC2086
+                check_modules && "$SETUP_CONFIG" $debug_flags --profiles
                 exit $?
                 ;;
             --defaults)
                 run_full=false
-                check_modules && "$SETUP_CONFIG" --defaults
+                local debug_flags=$(get_debug_flags)
+                # shellcheck disable=SC2086
+                check_modules && "$SETUP_CONFIG" $debug_flags --defaults
                 exit $?
                 ;;
             --groups)
                 run_full=false
-                check_modules && "$SETUP_GROUPS" --groups
+                local debug_flags=$(get_debug_flags)
+                # shellcheck disable=SC2086
+                check_modules && "$SETUP_GROUPS" $debug_flags --groups
                 exit $?
                 ;;
             --assign-buckets)
                 run_full=false
-                check_modules && "$SETUP_GROUPS" --assign-buckets
+                local debug_flags=$(get_debug_flags)
+                # shellcheck disable=SC2086
+                check_modules && "$SETUP_GROUPS" $debug_flags --assign-buckets
                 exit $?
                 ;;
             --list-buckets)
                 run_full=false
-                check_modules && "$SETUP_GROUPS" --list-buckets
+                local debug_flags=$(get_debug_flags)
+                # shellcheck disable=SC2086
+                check_modules && "$SETUP_GROUPS" $debug_flags --list-buckets
                 exit $?
                 ;;
             --autostart)
                 run_full=false
-                check_modules && "$SETUP_SYSTEM" --autostart
+                local debug_flags=$(get_debug_flags)
+                # shellcheck disable=SC2086
+                check_modules && "$SETUP_SYSTEM" $debug_flags --autostart
                 exit $?
                 ;;
             --symlinks)
                 run_full=false
-                check_modules && "$SETUP_SYSTEM" --symlinks
+                local debug_flags=$(get_debug_flags)
+                # shellcheck disable=SC2086
+                check_modules && "$SETUP_SYSTEM" $debug_flags --symlinks
                 exit $?
                 ;;
             --system)
                 run_full=false
-                check_modules && "$SETUP_SYSTEM" --system
+                local debug_flags=$(get_debug_flags)
+                # shellcheck disable=SC2086
+                check_modules && "$SETUP_SYSTEM" $debug_flags --system
                 exit $?
                 ;;
             --show-config)
