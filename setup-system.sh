@@ -286,7 +286,7 @@ interactive_setup() {
         fi
     else
         print_info "System optimizations available with sudo privileges"
-        if prompt_yes_no "Would you like instructions for system optimizations?" "n"; then
+        if prompt_yes_no "Would you like instructions for system optimizations?" "y"; then
             echo ""
             print_info "To apply system optimizations, run:"
             print_info "  sudo $0 --system"

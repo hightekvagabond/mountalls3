@@ -150,7 +150,11 @@ run_setup_wizard() {
 
 unmount_s3_buckets() {
     unmount_only=true
-    debug_debug "Set unmount mode"
+    # When --unmount is used, override any group/profile restrictions to unmount ALL
+    mount_all_profiles=true
+    selected_profile=""
+    mount_groups=""
+    debug_debug "Set unmount mode - will unmount ALL mounted s3fs buckets"
 }
 
 cleanup_directories() {
@@ -304,8 +308,8 @@ main() {
     # Initialize default values
     mountbase="$HOME/s3"
     selected_profile=""
-    mount_all_profiles=true
-    use_config=false
+    mount_all_profiles=false
+    use_config=true
     mount_groups=""
     config_available=false
     cleanup_only=false
@@ -405,9 +409,16 @@ main() {
     echo ""
 
     # Main mounting logic based on configuration
-    if [[ "$use_config" == true ]]; then
+    debug_info "=== MOUNT LOGIC DEBUG ==="
+    debug_info "use_config: '$use_config'"
+    debug_info "mount_all_profiles: '$mount_all_profiles'" 
+    debug_info "selected_profile: '$selected_profile'"
+    debug_info "mount_groups: '$mount_groups'"
+    debug_info "=========================="
+    
+    if [[ "$use_config" == true && -n "$mount_groups" ]]; then
         # Mount specific groups from config
-        echo "Mounting bucket groups: $mount_groups"
+        echo "📁 Mounting configured bucket groups: $mount_groups"
         debug_debug "mount_groups variable contains: '$mount_groups'"
         debug_debug "mount_groups length: ${#mount_groups}"
         debug_debug "mount_groups as array: $(declare -p mount_groups 2>/dev/null || echo 'not an array')"
@@ -471,6 +482,13 @@ main() {
         
     else
         # Mount all buckets from all profiles (original behavior)
+        if [[ "$use_config" == true && -z "$mount_groups" ]]; then
+            echo "🌟 No mount groups configured - mounting ALL buckets from ALL profiles (--all behavior)"
+            debug_info "Empty mount_groups detected, falling back to mount_all_profiles behavior"
+        else
+            echo "🚀 Mounting ALL buckets from ALL profiles (--all mode)"
+            debug_info "Explicit --all flag or mount_all_profiles=true"
+        fi
         profiles=$(aws configure list-profiles)
         debug_info "Mounting buckets from all AWS profiles"
         
