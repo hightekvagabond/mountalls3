@@ -162,11 +162,13 @@ apply_optimization_kernel_vm() {
     local force_apply="${1:-false}"
     
     print_header "Kernel VM Parameters Optimization"
+    echo "🟡 RISK LEVEL: RISKY - Only if experiencing I/O issues"
+    echo ""
     
     # Check if already applied
     if grep -q "# MountAllS3 VM optimizations" /etc/sysctl.conf 2>/dev/null; then
-        print_info "Kernel VM optimizations already applied"
-        return 0
+        print_info "✅ Kernel VM optimizations already applied - skipping"
+        return 1  # Return 1 to indicate "not newly applied"
     fi
     
     # Check logs for memory/performance issues
@@ -205,7 +207,7 @@ apply_optimization_kernel_vm() {
     if [[ "$force_apply" != true ]]; then
         if ! prompt_yes_no "Apply kernel VM optimizations? (affects system-wide memory management)" "n"; then
             print_info "Skipped kernel VM optimizations (recommended - apply only if experiencing issues)"
-            return 0
+            return 1  # Return 1 to indicate "not applied"
         fi
     fi
     
@@ -229,6 +231,7 @@ EOF
     
     print_success "Kernel VM optimizations applied"
     print_info "Changes are active immediately and will persist after reboot"
+    return 0  # Return 0 to indicate "successfully applied"
 }
 
 # Optimizes I/O scheduler for SSD systems with s3fs caches
@@ -237,6 +240,8 @@ apply_optimization_io_scheduler() {
     local force_apply="${1:-false}"
     
     print_header "I/O Scheduler Optimization"
+    echo "🟡 RISK LEVEL: MODERATE - For SSD systems"
+    echo ""
     
     # Detect storage types
     local ssd_devices=()
@@ -258,7 +263,7 @@ apply_optimization_io_scheduler() {
     # Only optimize if we have SSDs
     if [[ ${#ssd_devices[@]} -eq 0 ]]; then
         print_info "No SSD devices detected - I/O scheduler optimization not recommended"
-        return 0
+        return 1  # Return 1 to indicate "not applicable"
     fi
     
     # Check current schedulers
@@ -293,7 +298,7 @@ apply_optimization_io_scheduler() {
     if [[ "$force_apply" != true ]]; then
         if ! prompt_yes_no "Apply I/O scheduler optimizations for SSD devices?" "n"; then
             print_info "Skipped I/O scheduler optimizations"
-            return 0
+            return 1  # Return 1 to indicate "not applied"
         fi
     fi
     
@@ -326,6 +331,7 @@ EOF
     
     print_success "I/O scheduler optimizations applied"
     print_info "Changes are active now and will persist after reboot"
+    return 0  # Return 0 to indicate "successfully applied"
 }
 
 # Optimizes memory management for large s3fs caches
@@ -334,6 +340,8 @@ apply_optimization_memory_management() {
     local force_apply="${1:-false}"
     
     print_header "Memory Management Optimization for Large S3FS Caches"
+    echo "🔴 RISK LEVEL: HIGH RISK - Only for large cache workloads on 8GB+ systems"
+    echo ""
     
     # Check system memory
     local total_mem_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
@@ -342,13 +350,13 @@ apply_optimization_memory_management() {
     # Only recommend for systems with sufficient memory
     if [[ $total_mem_gb -lt 8 ]]; then
         print_warning "System has only ${total_mem_gb}GB RAM - memory optimizations not recommended"
-        return 0
+        return 1  # Return 1 to indicate "not applicable"
     fi
     
     # Check if already applied
     if grep -q "# MountAllS3 memory optimizations" /etc/sysctl.conf 2>/dev/null; then
-        print_info "Memory management optimizations already applied"
-        return 0
+        print_info "✅ Memory management optimizations already applied - skipping"
+        return 1  # Return 1 to indicate "not newly applied"
     fi
     
     # Explain the optimization
@@ -377,7 +385,7 @@ apply_optimization_memory_management() {
     if [[ "$force_apply" != true ]]; then
         if ! prompt_yes_no "Apply memory management optimizations? (only if using large s3fs caches)" "n"; then
             print_info "Skipped memory management optimizations (recommended unless you have large cache needs)"
-            return 0
+            return 1  # Return 1 to indicate "not applied"
         fi
     fi
     
@@ -402,78 +410,64 @@ EOF
     sysctl -p >/dev/null 2>&1
     
     print_success "Memory management optimizations applied"
+    return 0  # Return 0 to indicate "successfully applied"
 }
 
 # =============================================================================
 # MAIN FUNCTION
 # =============================================================================
 
-# Main function to present advanced optimizations
+# Main function to present advanced optimizations one by one
 apply_advanced_optimizations() {
     print_header "Advanced System Performance Optimizations"
     
     echo "⚠️  WARNING: These are advanced optimizations that modify system-wide settings"
     echo "⚠️  Only apply these if you are experiencing specific performance issues"
     echo ""
-    echo "Available advanced optimizations:"
+    echo "I'll walk you through each advanced optimization individually."
+    echo "For each one, you'll see:"
+    echo "  • What the optimization does"
+    echo "  • Why it might help"
+    echo "  • Log analysis to see if you're experiencing the issue"
+    echo "  • How to undo the change"
     echo ""
-    echo "1. 🟡 Kernel VM parameters (RISKY - only if experiencing I/O issues)"
-    echo "   Adjusts memory management for network filesystems"
-    echo ""
-    echo "2. 🟡 I/O scheduler optimization (MODERATE - for SSD systems)"
-    echo "   Sets deadline scheduler for SSD devices"
-    echo ""
-    echo "3. 🔴 Memory management (HIGH RISK - only for large cache workloads on 8GB+ systems)"
-    echo "   Optimizes memory handling for large s3fs caches"
-    echo ""
-    echo "ℹ️  Each optimization will check your logs for relevant issues before applying."
+    echo "You can decline any optimization and move to the next one."
     echo ""
     
-    local selected_opts=""
-    configure_value "selected_opts" \
-        "Enter comma-separated numbers (e.g., 1,2) for optimizations to apply. Each will ask for individual confirmation." \
-        "Which advanced optimizations to apply?" \
-        "" \
-        ""
-    
-    if [[ -z "$selected_opts" ]]; then
-        print_info "No advanced optimizations selected"
+    if ! prompt_yes_no "Ready to review advanced optimizations?" "y"; then
+        print_info "Advanced optimization review cancelled"
         return 0
     fi
     
-    if [[ "$selected_opts" == "all" ]]; then
-        selected_opts="1,2,3"
+    local applied_any=false
+    
+    # Go through each advanced optimization individually
+    echo ""
+    apply_optimization_kernel_vm
+    if [[ $? -eq 0 ]]; then
+        applied_any=true
     fi
     
-    local applied_any=false
-    IFS=',' read -ra opt_array <<< "$selected_opts"
-    for opt in "${opt_array[@]}"; do
-        case "${opt// /}" in
-            1) 
-                apply_optimization_kernel_vm
-                applied_any=true
-                ;;
-            2) 
-                apply_optimization_io_scheduler
-                applied_any=true
-                ;;
-            3) 
-                apply_optimization_memory_management
-                applied_any=true
-                ;;
-            *) 
-                print_warning "Unknown advanced optimization: $opt" 
-                ;;
-        esac
-        echo ""  # Add spacing between optimizations
-    done
+    echo ""
+    apply_optimization_io_scheduler
+    if [[ $? -eq 0 ]]; then
+        applied_any=true
+    fi
     
+    echo ""
+    apply_optimization_memory_management
+    if [[ $? -eq 0 ]]; then
+        applied_any=true
+    fi
+    
+    echo ""
     if [[ "$applied_any" == true ]]; then
-        print_success "Advanced optimization configuration completed"
+        print_success "Advanced optimization review completed"
         print_warning "Monitor your system performance after applying these changes"
         print_info "If you experience issues, you can restore from the backup files created"
     else
         print_info "No advanced optimizations were applied"
+        print_info "💡 You can run this again anytime when experiencing performance issues"
     fi
 }
 
