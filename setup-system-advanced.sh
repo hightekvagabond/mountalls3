@@ -542,39 +542,43 @@ show_usage() {
 
 # Main execution
 main() {
-    # Check for root privileges
-    if [[ $EUID -ne 0 ]]; then
-        print_error "Advanced optimizations require root privileges"
-        print_info "Please run with sudo: sudo $0 $*"
-        exit 1
-    fi
-    
     case "${1:-}" in
         --help|-h)
             show_usage
             ;;
-        --kernel-vm)
-            apply_optimization_kernel_vm
-            ;;
-        --io-scheduler)
-            apply_optimization_io_scheduler
-            ;;
-        --memory)
-            apply_optimization_memory_management
-            ;;
-        --all-advanced)
-            apply_advanced_optimizations
-            ;;
-        --interactive)
-            interactive_setup
-            ;;
-        "")
-            interactive_setup
-            ;;
         *)
-            print_error "Unknown option: $1"
-            show_usage
-            exit 1
+            # Check for root privileges for all other operations
+            if [[ $EUID -ne 0 ]]; then
+                print_error "Advanced optimizations require root privileges"
+                print_info "Please run with sudo: sudo $0 $*"
+                exit 1
+            fi
+            
+            case "${1:-}" in
+                --kernel-vm)
+                    apply_optimization_kernel_vm
+                    ;;
+                --io-scheduler)
+                    apply_optimization_io_scheduler
+                    ;;
+                --memory)
+                    apply_optimization_memory_management
+                    ;;
+                --all-advanced)
+                    apply_advanced_optimizations
+                    ;;
+                --interactive)
+                    interactive_setup
+                    ;;
+                "")
+                    interactive_setup
+                    ;;
+                *)
+                    print_error "Unknown option: $1"
+                    show_usage
+                    exit 1
+                    ;;
+            esac
             ;;
     esac
 }
