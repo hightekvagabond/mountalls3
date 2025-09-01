@@ -117,42 +117,34 @@ run_initial_setup() {
     echo "Let's get you set up with the initial configuration..."
     echo ""
     
-    # Try to find setup script in multiple locations
-    setup_script=""
+    # Use the reliable script directory from common.sh
+    local setup_script="$COMMON_SCRIPT_DIR/setup-mountalls3.sh"
     
-    # First, try same directory as this script
-    if [[ -f "$(dirname "$0")/setup-mountalls3.sh" ]]; then
-        setup_script="$(dirname "$0")/setup-mountalls3.sh"
-    # If this script is a symlink, try the original location
-    elif [[ -L "$0" ]]; then
-        script_dir="$(dirname "$(readlink -f "$0")")"
-        if [[ -f "$script_dir/setup-mountalls3.sh" ]]; then
-            setup_script="$script_dir/setup-mountalls3.sh"
-        fi
-    # Try common installation locations
-    elif [[ -f "$HOME/bin/setup-mountalls3.sh" ]]; then
-        setup_script="$HOME/bin/setup-mountalls3.sh"
-    elif [[ -f "$HOME/.local/bin/setup-mountalls3.sh" ]]; then
-        setup_script="$HOME/.local/bin/setup-mountalls3.sh"
-    fi
-    
-    if [[ -n "$setup_script" ]]; then
+    if [[ -f "$setup_script" ]]; then
         echo "Running setup script..."
         echo ""
-        exec "$setup_script"
+        
+        # Add current debug level flags
+        local debug_flags
+        debug_flags=$(get_debug_flags)
+        if [[ -n "$debug_flags" ]]; then
+            debug_debug "Passing debug flags and CLI args to initial setup script: $debug_flags $*"
+            # shellcheck disable=SC2086
+            exec "$setup_script" ${debug_flags} "$@"
+        else
+            debug_debug "Passing CLI args to initial setup script: $*"
+            exec "$setup_script" "$@"
+        fi
     else
         echo "❌ Setup script not found!"
+        echo "Expected location: $setup_script"
         echo ""
-        echo "Please ensure setup-mountalls3.sh is available in one of these locations:"
-        echo "  - Same directory as mountalls3.sh"
-        echo "  - $HOME/bin/"
-        echo "  - $HOME/.local/bin/"
-        echo ""
+        echo "Please ensure setup-mountalls3.sh is in the same directory as mountalls3.sh"
         echo "If you installed from source, the setup script should be in the same"
-        echo "directory where you cloned/downloaded mountalls3.sh"
+        echo "directory where you cloned/downloaded the project."
         echo ""
         echo "You can also run setup manually with:"
-        echo "  ./setup-mountalls3.sh"
+        echo "  $setup_script"
         exit 1
     fi
 }
@@ -202,7 +194,7 @@ main() {
     
     if [[ "$skip_setup_check" != true ]] && ! check_setup_completed; then
         debug_info "Setup not completed, running initial setup"
-        run_initial_setup
+        run_initial_setup "$@"
     fi
     debug_debug "Setup check completed"
 
@@ -961,26 +953,10 @@ parse_arguments() {
             exit 0
             ;;
             --setup)
-                # Try to find setup script in multiple locations
-                setup_script=""
+                # Use the reliable script directory from common.sh
+                local setup_script="$COMMON_SCRIPT_DIR/setup-mountalls3.sh"
                 
-                # First, try same directory as this script
-                if [[ -f "$(dirname "$0")/setup-mountalls3.sh" ]]; then
-                    setup_script="$(dirname "$0")/setup-mountalls3.sh"
-                # If this script is a symlink, try the original location
-                elif [[ -L "$0" ]]; then
-                    script_dir="$(dirname "$(readlink -f "$0")")"
-                    if [[ -f "$script_dir/setup-mountalls3.sh" ]]; then
-                        setup_script="$script_dir/setup-mountalls3.sh"
-                    fi
-                # Try common installation locations
-                elif [[ -f "$HOME/bin/setup-mountalls3.sh" ]]; then
-                    setup_script="$HOME/bin/setup-mountalls3.sh"
-                elif [[ -f "$HOME/.local/bin/setup-mountalls3.sh" ]]; then
-                    setup_script="$HOME/.local/bin/setup-mountalls3.sh"
-                fi
-                
-                if [[ -n "$setup_script" ]]; then
+                if [[ -f "$setup_script" ]]; then
                     # Remove --setup from arguments and add debug flags
                     local setup_args=()
                     for arg in "$@"; do
@@ -1001,14 +977,14 @@ parse_arguments() {
                     fi
                 else
                     echo "❌ Setup script not found!"
+                    echo "Expected location: $setup_script"
                     echo ""
-                    echo "Please ensure setup-mountalls3.sh is available in one of these locations:"
-                    echo "  - Same directory as mountalls3.sh"
-                    echo "  - $HOME/bin/"
-                    echo "  - $HOME/.local/bin/"
-                    echo ""
+                    echo "Please ensure setup-mountalls3.sh is in the same directory as mountalls3.sh"
                     echo "If you installed from source, the setup script should be in the same"
-                    echo "directory where you cloned/downloaded mountalls3.sh"
+                    echo "directory where you cloned/downloaded the project."
+                    echo ""
+                    echo "You can also run setup manually with:"
+                    echo "  $setup_script"
                     exit 1
                 fi
                 ;;

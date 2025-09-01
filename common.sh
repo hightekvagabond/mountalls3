@@ -32,7 +32,7 @@ MOUNTALLS3_COMMON_LOADED=true
 # =============================================================================
 
 # Script directories and paths
-COMMON_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+COMMON_SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 MOUNTALLS3_SCRIPT="$COMMON_SCRIPT_DIR/mountalls3.sh"
 CONFIG_DIR="$HOME/.config/mountalls3"
 CONFIG_FILE="$CONFIG_DIR/config.json"
