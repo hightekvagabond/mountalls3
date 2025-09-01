@@ -426,6 +426,10 @@ apply_optimization_updatedb() {
     echo "  • Reduces S3 API calls and costs"
     echo "  • Eliminates potential s3fs hangs during updatedb runs"
     echo ""
+    echo "📝 To undo manually:"
+    echo "  sudo cp /etc/updatedb.conf.backup.* /etc/updatedb.conf"
+    echo "  sudo updatedb  # Rebuild locate database"
+    echo ""
     
     if [[ "$logs_show_issue" == true ]]; then
         echo "✅ Your logs show evidence of s3fs performance issues that this could help resolve."
@@ -481,6 +485,11 @@ apply_optimization_file_limits() {
     echo "  • Prevents 'too many open files' errors with s3fs"
     echo "  • Allows more concurrent S3 connections"
     echo "  • Better performance with large directory structures"
+    echo ""
+    echo "📝 To undo manually:"
+    echo "  sudo cp /etc/security/limits.conf.backup.* /etc/security/limits.conf"
+    echo "  Edit /etc/sysctl.conf and remove/change fs.file-max line"
+    echo "  sudo sysctl -p && restart your session"
     echo ""
     echo "ℹ️  This is a safe optimization that only increases limits (never decreases them)"
     echo ""
@@ -552,6 +561,10 @@ apply_optimization_network_buffers() {
     echo "  • Higher throughput for large S3 transfers"
     echo "  • Better handling of high-latency connections"
     echo "  • Reduced TCP retransmissions"
+    echo ""
+    echo "📝 To undo manually:"
+    echo "  sudo cp /etc/sysctl.conf.backup.* /etc/sysctl.conf"
+    echo "  sudo sysctl -p  # Or edit /etc/sysctl.conf and remove MountAllS3 network section"
     echo ""
     
     if [[ "$logs_show_issue" == true ]]; then
