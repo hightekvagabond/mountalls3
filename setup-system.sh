@@ -687,24 +687,20 @@ apply_system_optimizations() {
     
     local applied_any=false
     
-    # Go through each optimization individually
-    echo ""
-    apply_optimization_updatedb
-    if [[ $? -eq 0 ]]; then
-        applied_any=true
-    fi
+    # Array of optimization functions to execute
+    local optimizations=(
+        "apply_optimization_updatedb"
+        "apply_optimization_file_limits"
+        "apply_optimization_network_buffers"
+    )
     
-    echo ""
-    apply_optimization_file_limits
-    if [[ $? -eq 0 ]]; then
-        applied_any=true
-    fi
-    
-    echo ""
-    apply_optimization_network_buffers
-    if [[ $? -eq 0 ]]; then
-        applied_any=true
-    fi
+    # Execute each optimization and track if any were applied
+    for optimization_func in "${optimizations[@]}"; do
+        echo ""
+        if "$optimization_func"; then
+            applied_any=true
+        fi
+    done
     
     echo ""
     print_header "Additional Advanced Optimizations Available"

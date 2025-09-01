@@ -3,6 +3,18 @@
 # =============================================================================
 # MountAllS3 Bucket Groups Setup
 # =============================================================================
+#
+# DESCRIPTION:
+#   Manages S3 bucket organization into logical groups for easy mounting.
+#   Supports interactive bucket assignment, pattern matching, and group creation.
+#
+# FEATURES:
+#   - Create and manage bucket groups
+#   - Assign buckets to groups by profile
+#   - Pattern-based bucket matching for automation
+#   - Configure default mount groups
+#
+# =============================================================================
 
 # Load common functions
 COMMON_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -806,19 +818,23 @@ assign_to_selected_group() {
                 local selected_buckets=()
                 
                 # Parse the selection (supports ranges like 12-15)
+                # For junior developers: This parsing logic handles both individual numbers and ranges
                 for item in $selection; do
                     if [[ "$item" =~ ^([0-9]+)-([0-9]+)$ ]]; then
-                        # Range format: 12-15
-                        local start=${BASH_REMATCH[1]}
-                        local end=${BASH_REMATCH[2]}
+                        # Range format: 12-15 - regex captures start and end numbers
+                        local start=${BASH_REMATCH[1]}  # First captured group (start number)
+                        local end=${BASH_REMATCH[2]}    # Second captured group (end number)
+                        # Expand the range into individual selections
                         for ((i=start; i<=end; i++)); do
                             if [[ $i -ge 1 && $i -le ${#unassigned_buckets[@]} ]]; then
+                                # Convert 1-based user input to 0-based array index
                                 selected_buckets+=("${unassigned_buckets[$((i-1))]}")
                             fi
                         done
                     elif [[ "$item" =~ ^[0-9]+$ ]]; then
-                        # Single number
+                        # Single number - direct selection
                         if [[ $item -ge 1 && $item -le ${#unassigned_buckets[@]} ]]; then
+                            # Convert 1-based user input to 0-based array index
                             selected_buckets+=("${unassigned_buckets[$((item-1))]}")
                         fi
                     fi

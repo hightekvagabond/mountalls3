@@ -3,6 +3,16 @@
 # =============================================================================
 # MountAllS3 Basic Configuration Setup
 # =============================================================================
+#
+# DESCRIPTION:
+#   Configures essential MountAllS3 settings including mount base directory,
+#   AWS profile selection, and default bucket groups for mounting.
+#
+# USAGE:
+#   Part of the modular setup system - can be run standalone or via orchestrator.
+#   Uses data-driven flag parsing for consistent CLI behavior.
+#
+# =============================================================================
 
 # Load common functions
 COMMON_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

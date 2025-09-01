@@ -100,12 +100,17 @@ cleanup_only=false
 unmount_only=false
 
 # Handler functions for each flag
+
+# Sets the AWS profile to use for mounting buckets
+# Updates global variables to disable all-profile mode
 set_profile() {
     selected_profile="$1"
     mount_all_profiles=false
     debug_debug "Set profile: $selected_profile"
 }
 
+# Adds bucket groups to the current selection (additive)
+# Appends to existing groups rather than replacing them
 add_groups() {
     local additional_groups="$1"
     if [[ -n "$mount_groups" ]]; then
@@ -119,6 +124,8 @@ add_groups() {
     mount_all_profiles=false
 }
 
+# Replaces default groups with specific selection
+# Ignores config defaults and uses only specified groups
 replace_groups() {
     mount_groups="$1"
     use_config=true
@@ -126,6 +133,8 @@ replace_groups() {
     debug_debug "Replaced groups (ignoring defaults): $mount_groups"
 }
 
+# Enables mounting all buckets from all available AWS profiles
+# Bypasses configuration groups and profile selection
 mount_all_buckets() {
     mount_all_profiles=true
     use_config=false
@@ -134,20 +143,28 @@ mount_all_buckets() {
     debug_debug "Set to mount all buckets from all profiles"
 }
 
+# Sets custom mount base directory overriding configuration default
+# Updates the global mountbase variable for current session
 set_mount_base() {
     mountbase="$1"
     debug_debug "Set mount base: $mountbase"
 }
 
+# Displays all configured bucket groups and exits
+# Shows groups with descriptions and bucket counts
 list_config_groups() {
     list_groups
     exit 0
 }
 
+# Launches the interactive setup wizard
+# Delegates to the setup orchestrator script with all arguments
 run_setup_wizard() {
     run_initial_setup "$@"
 }
 
+# Configures script to unmount all mounted S3 buckets
+# Overrides any profile or group restrictions to ensure complete cleanup
 unmount_s3_buckets() {
     unmount_only=true
     # When --unmount is used, override any group/profile restrictions to unmount ALL
@@ -157,21 +174,29 @@ unmount_s3_buckets() {
     debug_debug "Set unmount mode - will unmount ALL mounted s3fs buckets"
 }
 
+# Configures script to clean up empty mount directories only
+# Performs safe cleanup without mounting or unmounting operations
 cleanup_directories() {
     cleanup_only=true
     debug_debug "Set cleanup mode"
 }
 
+# Enables verbose output showing detailed operation information
+# Sets debug level to 2 for increased visibility
 set_verbose_mode() {
     set_debug_level 2
     debug_debug "Set verbose mode (level 2)"
 }
 
+# Enables debug output with maximum verbosity for troubleshooting
+# Sets debug level to 3 showing internal operations and state changes
 set_debug_mode() {
     set_debug_level 3
     debug_debug "Set debug mode (level 3)"
 }
 
+# Displays help information and exits
+# Simple wrapper for the comprehensive usage function
 show_help() {
     show_usage
     exit 0
@@ -654,6 +679,8 @@ get_sts_credentials() {
     
     if [[ -z "$expiry" ]] || [[ "$current_time" -ge "$expiry" ]]; then
         # Credentials expired, clean them up
+        # Note for junior developers: These keyctl commands manage Linux session keyring
+        # @s means "session keyring", unlink removes keys, search finds them by name
         keyctl unlink $(keyctl search @s user "s3fs_access_${profile}" 2>/dev/null) @s 2>/dev/null
         keyctl unlink $(keyctl search @s user "s3fs_secret_${profile}" 2>/dev/null) @s 2>/dev/null
         keyctl unlink $(keyctl search @s user "s3fs_token_${profile}" 2>/dev/null) @s 2>/dev/null
@@ -693,7 +720,9 @@ generate_sts_credentials() {
         return 1
     fi
     
-    # Parse JSON output
+    # Parse JSON output using grep and cut (avoiding jq dependency here)
+    # For junior developers: These grep patterns find JSON key-value pairs and extract the values
+    # The [[:space:]]* matches any whitespace, [^"]* matches anything except quotes
     local access_key=$(echo "$sts_output" | grep -o '"AccessKeyId"[[:space:]]*:[[:space:]]*"[^"]*"' | cut -d'"' -f4)
     local secret_key=$(echo "$sts_output" | grep -o '"SecretAccessKey"[[:space:]]*:[[:space:]]*"[^"]*"' | cut -d'"' -f4)
     local session_token=$(echo "$sts_output" | grep -o '"SessionToken"[[:space:]]*:[[:space:]]*"[^"]*"' | cut -d'"' -f4)
@@ -918,14 +947,21 @@ mount_single_bucket() {
 
     # Determine bucket region and set appropriate endpoint
     locationinfo="$(aws s3api get-bucket-location --profile=$profile --bucket $bucket 2>/dev/null)"
+    # For junior developers: This regex extracts the AWS region from JSON response
+    # The regex looks for "LocationConstraint": "region-name" and captures the region
     reg='\"LocationConstraint\": \"(.*?)\"'
-    [[ "$locationinfo" =~ $reg ]] 
-    location="${BASH_REMATCH[1]}"
+    [[ "$locationinfo" =~ $reg ]]  # Bash regex matching operator
+    location="${BASH_REMATCH[1]}"  # BASH_REMATCH[1] contains the first captured group
     if [[ ! -z $location ]]; then
+        # Set region-specific S3 endpoint for better performance and availability
         option="$option -o url=https://s3-$location.amazonaws.com "
     fi
 
     # Build the s3fs mount command with performance optimizations
+    # For junior developers: These s3fs options improve performance:
+    # enable_noobj_cache: cache negative lookups (files that don't exist)
+    # multireq_max=20: allow up to 20 parallel requests to S3
+    # parallel_count=5: parallel uploads/downloads for large files
     performance_opts="-o enable_noobj_cache -o notsup_compat_dir -o multireq_max=20 -o parallel_count=5 -o complement_stat"
     
     # Add local cache directory if it doesn't exist

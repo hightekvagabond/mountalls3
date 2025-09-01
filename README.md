@@ -56,36 +56,24 @@ aws configure --profile myprofile
 
 ## 🔧 Installation
 
-1. **Download the script:**
+1. **Clone the repository:**
    ```bash
-   wget https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/mountalls3.sh
-   # OR
-   curl -O https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/mountalls3.sh
+   git clone https://github.com/hightekvagabond/mountalls3.git
+   cd mountalls3
    ```
 
-2. **Make it executable:**
+2. **Start using:**
    ```bash
-   chmod +x mountalls3.sh
-   ```
-
-3. **Run setup:**
-   ```bash
-   ./setup-mountalls3.sh
-   ```
-
-4. **Start using:**
-   ```bash
-   ./mountalls3.sh
-   # Or if you set up symlinks: mountalls3
+   ./mountalls3.sh         # First run will guide you through setup
    ```
 
 ## 📖 Usage
 
 ### Quick Start
 
-**First time setup:**
+**First time (automatically runs setup):**
 ```bash
-./setup-mountalls3.sh  # Run the interactive setup wizard
+./mountalls3.sh         # First run will guide you through setup
 ```
 
 **Daily usage:**
@@ -93,6 +81,8 @@ aws configure --profile myprofile
 ./mountalls3.sh         # Mount your default bucket groups
 ./mountalls3.sh --unmount  # Unmount all when done
 ```
+
+> **💡 Default Behavior:** If you accept all defaults during setup, the script will automatically mount all S3 buckets you have access to across all your AWS profiles. The configuration system is designed for users with many buckets who want to organize them into groups for better system performance and selective mounting.
 
 ### Main Script Options
 
@@ -105,48 +95,22 @@ For complete usage instructions, command line options, and examples:
 **Common usage patterns:**
 ```bash
 # Basic operations
-./mountalls3.sh                    # Mount default groups
-./mountalls3.sh -a                 # Mount all buckets from all profiles
-./mountalls3.sh -p myprofile       # Mount only buckets from 'myprofile'
-./mountalls3.sh -g websites,infra  # Mount specific bucket groups
+./mountalls3.sh                      # Mount default groups
+./mountalls3.sh --all                # Mount all buckets from all profiles
+./mountalls3.sh --profile myprofile  # Mount only buckets from 'myprofile'
+./mountalls3.sh --group websites     # Mount specific bucket groups
 
 # Unmounting
-./mountalls3.sh --unmount          # Unmount all S3 buckets
-./mountalls3.sh -p work --unmount  # Unmount only 'work' profile buckets
+./mountalls3.sh --unmount            # Unmount all S3 buckets
 
 # Maintenance
-./mountalls3.sh --cleanup          # Clean up empty directories
-./mountalls3.sh --list-groups      # Show available bucket groups
+./mountalls3.sh --cleanup            # Clean up empty directories
+./mountalls3.sh --list-groups        # Show available bucket groups
 ```
 
 ## 🔄 Auto-Start Setup
 
-Use the setup script to configure MountAllS3 to automatically start when you log in:
-
-```bash
-./setup-mountalls3.sh
-```
-
-The setup script will:
-- Create desktop environment autostart entries (works with GNOME, KDE Plasma, XFCE, etc.)
-- Set up symlinks to your personal bin directory for easy access
-- Configure system-level performance optimizations (if run with sudo)
-- Set up your bucket groups and preferences
-- Allow you to enable/disable auto-start easily
-
-This is much more user-friendly than crontab and integrates properly with your desktop environment.
-
-### Personal Bin Directory Integration
-
-The setup script can create symlinks in your personal bin directory (`~/bin`, `~/.local/bin`, etc.) so you can run `mountalls3` from anywhere:
-
-```bash
-# After setup with symlinks
-mountalls3              # Mount default groups
-mountalls3 -g websites   # Mount specific groups
-mountalls3 --setup      # Access setup from anywhere
-mountalls3 --unmount    # Unmount all
-```
+The script can automatically start when you log in. During first-time setup, you'll be asked if you want to enable this feature. It works with all major desktop environments (GNOME, KDE, XFCE, etc.).
 
 ## 🧹 Directory Cleanup
 
@@ -154,85 +118,25 @@ MountAllS3 automatically cleans up empty unmounted directories after each run to
 
 Use `./mountalls3.sh --cleanup` for manual cleanup or see `--help` for details.
 
-## 🏗️ Modular Architecture
 
-MountAllS3 uses a sophisticated modular design with data-driven configuration:
-
-### **Setup Modules:**
-- **`setup-mountalls3.sh`** - Main orchestrator that routes to specialized modules
-- **`setup-config.sh`** - Basic configuration (mount location, AWS profiles, defaults)
-- **`setup-groups.sh`** - Bucket group management and bucket assignment
-- **`setup-system.sh`** - System integration (autostart, symlinks, optimizations)
-- **`common.sh`** - Shared library with smart flag parsing and utilities
-
-### **Data-Driven Flag System:**
-Each setup module defines its flags in a declarative data structure:
-
-```bash
-register_flag "mount-location" "configure_mount_location" "optional" "~/s3" \
-    "Configure mount base directory" \
-    "What would you like your mount directory to be?" \
-    "S3 buckets will be mounted as subdirectories under this location..."
-```
-
-Benefits:
-- **Zero code duplication** - Common flag parsing for all modules
-- **Consistent UX** - Identical help format and behavior across scripts
-- **Self-documenting** - Help text automatically generated from definitions
-- **Type-safe** - Built-in parameter validation and handling
-- **Interactive integration** - Automatic prompts for missing values
-
-### **Usage Patterns:**
-```bash
-# Non-interactive (automation-friendly)
-./setup-config.sh --mount-location ~/my-s3 --profiles
-
-# Interactive (user-friendly prompts)
-./setup-config.sh --mount-location
-
-# Help (dynamically generated)
-./setup-config.sh --help
-```
 
 ## ⚙️ Configuration
 
-MountAllS3 uses a configuration file at `~/.config/mountalls3/config.json` to organize your S3 buckets into logical groups.
+The script creates a configuration file at `~/.config/mountalls3/config.json` to organize your S3 buckets into logical groups. The first time you run the script, it will guide you through the setup process.
 
-### Initial Setup
+### Modifying Configuration
 
-Run the setup script to create your configuration:
+To modify your configuration after initial setup:
 
 ```bash
-./setup-mountalls3.sh
+./mountalls3.sh --setup
 ```
 
-### Configuration File Structure
-
-```json
-{
-  "defaults": {
-    "mount_groups": ["user-folders"],
-    "mount_base": "~/s3",
-    "aws_profile": "all"
-  },
-  "groups": {
-    "user-folders": {
-      "description": "Personal user folders and data",
-      "buckets": [
-        {"profile": "personal", "bucket": "my-personal-files"},
-        {"profile": "work", "bucket": "user-documents"}
-      ]
-    },
-    "websites": {
-      "description": "Website assets and static files",
-      "buckets": [
-        {"profile": "production", "bucket": "company-website-assets"},
-        {"profile": "personal", "bucket": "personal-blog-assets"}
-      ]
-    }
-  }
-}
-```
+This allows you to:
+- Configure which AWS profiles are accessible by the script
+- Add new bucket groups or modify existing ones
+- Add buckets to existing groups
+- Change default mount settings
 
 ### Using Groups
 
@@ -241,13 +145,13 @@ Run the setup script to create your configuration:
 ./mountalls3.sh
 
 # Mount specific groups
-./mountalls3.sh -g user-folders,websites
+./mountalls3.sh --group user-folders
 
 # List available groups
 ./mountalls3.sh --list-groups
 
 # Mount all buckets (ignore config)
-./mountalls3.sh -a
+./mountalls3.sh --all
 ```
 
 ## ⚡ Performance Optimizations
@@ -263,47 +167,9 @@ This script includes several performance optimizations to minimize resource usag
   - `ensure_diskfree=1024`: Maintains 1GB free space for cache operations
 - **Smart Region Detection**: Automatically sets optimal S3 endpoints
 
-### System Configuration
+### System Optimization
 
-The biggest performance issue with idle s3fs mounts comes from system utilities scanning mounted directories. The setup script provides multiple levels of optimization:
-
-#### Safe Optimizations (Recommended for all users)
-```bash
-sudo ./setup-system.sh --system
-```
-
-This applies safe optimizations with log analysis and user consent:
-
-1. **🟢 UpdateDB Optimization (SAFE)** - Prevents `locate`/`updatedb` from scanning s3fs mounts
-   - Eliminates thousands of unnecessary S3 API calls per minute
-   - Reduces high memory usage (multiple GBs in some cases)
-   - Prevents network bandwidth consumption and increased AWS costs
-
-2. **🟢 File Descriptor Limits (SAFE)** - Increases limits to prevent "too many open files" errors
-   - Allows more concurrent S3 connections
-   - Better performance with large directory structures
-
-3. **🟡 Network Buffer Optimization (MODERATE)** - For high-throughput workloads
-   - Increases network buffer sizes for better S3 transfer speeds
-   - Beneficial for large file transfers
-
-#### Advanced Optimizations (For specific performance issues)
-```bash
-sudo ./setup-system-advanced.sh
-```
-
-For users experiencing specific performance problems, advanced optimizations are available:
-
-- **🟡 Kernel VM Parameters** - Adjusts memory management for network filesystems
-- **🟡 I/O Scheduler** - Optimizes SSD scheduler for s3fs cache performance  
-- **🔴 Memory Management** - Advanced memory tuning for large cache workloads (8GB+ RAM)
-
-**Each optimization:**
-- ✅ Checks system logs for evidence of the specific issue it solves
-- ✅ Explains what the change does and potential risks
-- ✅ Asks for explicit user consent before applying
-- ✅ Creates backup files before making changes
-- ✅ Can be applied individually or in combination
+For users with many S3 buckets or performance issues, the script offers system optimizations during setup. These are completely optional but can improve performance significantly.
 
 ### Monitoring Performance
 
@@ -422,9 +288,8 @@ Contributions are welcome! Here are ways you can help:
 ### Development Setup
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/YOUR_REPO.git
-cd YOUR_REPO
-chmod +x mountalls3.sh
+git clone https://github.com/hightekvagabond/mountalls3.git
+cd mountalls3
 ```
 
 ## 📄 License
@@ -454,6 +319,10 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+## 📚 Additional Documentation
+
+- **[Technical Architecture](TECHNICAL_ARCHITECTURE.md)** - Detailed technical design and implementation details for developers
 
 ## ⭐ Support
 

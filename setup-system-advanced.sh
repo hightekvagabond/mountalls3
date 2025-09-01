@@ -458,24 +458,20 @@ apply_advanced_optimizations() {
     
     local applied_any=false
     
-    # Go through each advanced optimization individually
-    echo ""
-    apply_optimization_kernel_vm
-    if [[ $? -eq 0 ]]; then
-        applied_any=true
-    fi
+    # Array of advanced optimization functions to execute
+    local advanced_optimizations=(
+        "apply_optimization_kernel_vm"
+        "apply_optimization_io_scheduler"
+        "apply_optimization_memory_management"
+    )
     
-    echo ""
-    apply_optimization_io_scheduler
-    if [[ $? -eq 0 ]]; then
-        applied_any=true
-    fi
-    
-    echo ""
-    apply_optimization_memory_management
-    if [[ $? -eq 0 ]]; then
-        applied_any=true
-    fi
+    # Execute each advanced optimization and track if any were applied
+    for optimization_func in "${advanced_optimizations[@]}"; do
+        echo ""
+        if "$optimization_func"; then
+            applied_any=true
+        fi
+    done
     
     echo ""
     if [[ "$applied_any" == true ]]; then
