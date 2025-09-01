@@ -138,15 +138,26 @@ check_logs_for_io_issues() {
         "disk.*timeout"
     )
     
-    debug_debug "Checking logs for I/O performance issues..."
+    echo "🔍 Analyzing logs for I/O performance issues..."
     
     if command -v journalctl >/dev/null 2>&1; then
-        for pattern in "${io_patterns[@]}"; do
-            if journalctl --since "7 days ago" | grep -i "$pattern" | grep -q fuse; then
-                debug_debug "Found I/O issue related to fuse: $pattern"
-                return 0
-            fi
-        done
+        echo -n "   Checking systemd journal for I/O issues (last 2 hours)... "
+        local found_issues=false
+        # Use very restrictive time window and line limit to prevent hanging
+        if timeout 5s journalctl --since "2 hours ago" --lines=100 >/dev/null 2>&1; then
+            for pattern in "${io_patterns[@]}"; do
+                if timeout 5s journalctl --since "2 hours ago" --lines=100 | grep -i "$pattern" | grep -q fuse; then
+                    echo "⚠️  I/O issues found"
+                    debug_debug "Found I/O issue related to fuse: $pattern"
+                    return 0
+                fi
+            done
+            echo "✅ clean"
+        else
+            echo "⏰ timeout (journal too large, skipping detailed check)"
+        fi
+    else
+        echo "   systemd journal not available"
     fi
     
     return 1
@@ -166,9 +177,9 @@ apply_optimization_kernel_vm() {
     echo ""
     
     # Check if already applied
+    local already_applied=false
     if grep -q "# MountAllS3 VM optimizations" /etc/sysctl.conf 2>/dev/null; then
-        print_info "✅ Kernel VM optimizations already applied - skipping"
-        return 1  # Return 1 to indicate "not newly applied"
+        already_applied=true
     fi
     
     # Check logs for memory/performance issues
@@ -203,6 +214,12 @@ apply_optimization_kernel_vm() {
         echo "   This optimization may not be needed unless you experience performance problems."
     fi
     echo ""
+    
+    if [[ "$already_applied" == true ]]; then
+        print_info "✅ Kernel VM optimizations already applied"
+        print_info "💡 This information is shown for reference and troubleshooting"
+        return 1  # Return 1 to indicate "not newly applied"
+    fi
     
     if [[ "$force_apply" != true ]]; then
         if ! prompt_yes_no "Apply kernel VM optimizations? (affects system-wide memory management)" "n"; then
