@@ -3,6 +3,18 @@
 # =============================================================================
 # MountAllS3 System Integration Setup
 # =============================================================================
+#
+# DESCRIPTION:
+#   Configures system-level integrations for MountAllS3 including desktop
+#   autostart, command symlinks, and performance optimizations.
+#
+# FEATURES:
+#   - Desktop environment autostart configuration
+#   - Command symlink creation for easy access
+#   - System performance optimizations (requires sudo)
+#   - PATH management and shell integration
+#
+# =============================================================================
 
 # Load common functions
 COMMON_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -232,29 +244,415 @@ configure_system_optimizations() {
     fi
 }
 
-# Applies system-level optimizations for s3fs performance
-# Updates /etc/updatedb.conf to exclude s3fs from locate database
-apply_system_optimizations() {
-    print_step "Applying system optimizations..."
+# Applies updatedb optimization to exclude s3fs mounts from locate database
+# Prevents locate/updatedb from scanning s3fs mounts which causes performance issues
+apply_system_optimizations_updatedb() {
+    print_step "Applying updatedb optimization..."
     
     # Update /etc/updatedb.conf to exclude s3fs mounts
     local updatedb_conf="/etc/updatedb.conf"
     if [[ -f "$updatedb_conf" ]]; then
-        if ! grep -q "fuse.s3fs" "$updatedb_conf"; then
+        # Check specifically if fuse.s3fs is already in the PRUNEFS line (not just anywhere in the file)
+        # This regex looks for PRUNEFS="..." and checks if fuse.s3fs is within those quotes
+        if ! grep -q '^[[:space:]]*PRUNEFS="[^"]*fuse\.s3fs[^"]*"' "$updatedb_conf"; then
             # Backup original
             cp "$updatedb_conf" "$updatedb_conf.backup.$(date +%Y%m%d_%H%M%S)"
             
-            # Add fuse.s3fs to PRUNEFS
+            # Add fuse.s3fs to PRUNEFS (regex explanation for junior developers):
+            # This sed command finds PRUNEFS="..." and appends " fuse.s3fs" inside the quotes
+            # The [^"]* matches everything inside quotes, & keeps the matched content, then adds our filesystem type
             sed -i 's/PRUNEFS="[^"]*/& fuse.s3fs/' "$updatedb_conf"
             print_success "Updated $updatedb_conf to exclude s3fs mounts from indexing"
         else
-            print_info "s3fs already excluded from updatedb"
+            print_info "fuse.s3fs already exists in PRUNEFS line"
         fi
     else
         print_warning "updatedb.conf not found, skipping updatedb optimization"
     fi
     
-    print_success "System optimizations applied"
+    print_success "updatedb optimization applied"
+}
+
+# =============================================================================
+# LOG ANALYSIS FUNCTIONS
+# =============================================================================
+
+# Checks system logs for s3fs performance issues
+# Returns 0 if issues found, 1 if no issues detected
+check_logs_for_s3fs_issues() {
+    local log_files=(
+        "/var/log/syslog"
+        "/var/log/messages" 
+        "/var/log/kern.log"
+        "/var/log/dmesg"
+    )
+    
+    local issues_found=0
+    local temp_log="/tmp/s3fs_log_check.$$"
+    
+    # Patterns that indicate s3fs performance issues
+    local issue_patterns=(
+        "s3fs.*slow"
+        "s3fs.*timeout"
+        "fuse.s3fs.*performance"
+        "updatedb.*s3fs"
+        "locate.*s3fs.*slow"
+        "s3fs.*blocked"
+        "s3fs.*hanging"
+        "too many open files.*s3fs"
+        "out of memory.*s3fs"
+    )
+    
+    debug_debug "Checking system logs for s3fs performance issues..."
+    
+    # Check available log files
+    for log_file in "${log_files[@]}"; do
+        if [[ -r "$log_file" ]]; then
+            for pattern in "${issue_patterns[@]}"; do
+                if grep -i "$pattern" "$log_file" >/dev/null 2>&1; then
+                    echo "Found s3fs issue pattern '$pattern' in $log_file" >> "$temp_log"
+                    issues_found=1
+                fi
+            done
+        fi
+    done
+    
+    # Check systemd journal if available
+    if command -v journalctl >/dev/null 2>&1; then
+        for pattern in "${issue_patterns[@]}"; do
+            if journalctl --since "7 days ago" | grep -i "$pattern" >/dev/null 2>&1; then
+                echo "Found s3fs issue pattern '$pattern' in systemd journal" >> "$temp_log"
+                issues_found=1
+            fi
+        done
+    fi
+    
+    if [[ $issues_found -eq 1 && -f "$temp_log" ]]; then
+        print_warning "Found s3fs performance issues in logs:"
+        cat "$temp_log"
+        rm -f "$temp_log"
+        return 0
+    else
+        debug_debug "No s3fs performance issues found in logs"
+        rm -f "$temp_log"
+        return 1
+    fi
+}
+
+# Checks for specific network performance issues in logs
+check_logs_for_network_issues() {
+    local log_files=(
+        "/var/log/syslog"
+        "/var/log/messages"
+        "/var/log/kern.log"
+    )
+    
+    local network_patterns=(
+        "tcp.*retransmit"
+        "tcp.*timeout"
+        "network.*slow"
+        "connection.*reset"
+        "tcp.*congestion"
+    )
+    
+    debug_debug "Checking logs for network performance issues..."
+    
+    for log_file in "${log_files[@]}"; do
+        if [[ -r "$log_file" ]]; then
+            for pattern in "${network_patterns[@]}"; do
+                if grep -i "$pattern" "$log_file" | tail -20 | grep -q "$(date +%Y-%m-%d)"; then
+                    debug_debug "Found recent network issue: $pattern in $log_file"
+                    return 0
+                fi
+            done
+        fi
+    done
+    
+    return 1
+}
+
+# Checks for I/O performance issues in logs
+check_logs_for_io_issues() {
+    local io_patterns=(
+        "blocked for more than"
+        "task.*blocked"
+        "hung_task"
+        "io.*slow"
+        "disk.*timeout"
+    )
+    
+    debug_debug "Checking logs for I/O performance issues..."
+    
+    if command -v journalctl >/dev/null 2>&1; then
+        for pattern in "${io_patterns[@]}"; do
+            if journalctl --since "7 days ago" | grep -i "$pattern" | grep -q fuse; then
+                debug_debug "Found I/O issue related to fuse: $pattern"
+                return 0
+            fi
+        done
+    fi
+    
+    return 1
+}
+
+# =============================================================================
+# INDIVIDUAL OPTIMIZATION FUNCTIONS
+# =============================================================================
+
+# Optimizes updatedb configuration to exclude s3fs mounts
+# Safe: Only modifies PRUNEFS in /etc/updatedb.conf
+apply_optimization_updatedb() {
+    local force_apply="${1:-false}"
+    
+    print_header "UpdateDB Optimization (Exclude s3fs from locate database)"
+    
+    # Check if already applied
+    local updatedb_conf="/etc/updatedb.conf"
+    if [[ -f "$updatedb_conf" ]] && grep -q '^[[:space:]]*PRUNEFS="[^"]*fuse\.s3fs[^"]*"' "$updatedb_conf"; then
+        print_info "UpdateDB optimization already applied"
+        return 0
+    fi
+    
+    # Check logs for updatedb/locate issues
+    local logs_show_issue=false
+    if check_logs_for_s3fs_issues; then
+        logs_show_issue=true
+    fi
+    
+    # Explain the optimization
+    echo "This optimization prevents the 'locate' command from scanning s3fs mount points."
+    echo "Benefits:"
+    echo "  • Prevents updatedb from causing high I/O on S3 buckets"
+    echo "  • Reduces S3 API calls and costs"
+    echo "  • Eliminates potential s3fs hangs during updatedb runs"
+    echo ""
+    
+    if [[ "$logs_show_issue" == true ]]; then
+        echo "✅ Your logs show evidence of s3fs performance issues that this could help resolve."
+    else
+        echo "ℹ️  No evidence of updatedb/locate issues in recent logs, but this is still a good preventive measure."
+    fi
+    echo ""
+    
+    if [[ "$force_apply" != true ]]; then
+        if ! prompt_yes_no "Apply updatedb optimization now?" "y"; then
+            print_info "Skipped updatedb optimization (you can run this again later if needed)"
+            return 0
+        fi
+    fi
+    
+    # Apply the optimization
+    apply_system_optimizations_updatedb
+}
+
+# Optimizes file descriptor limits for s3fs
+# Low risk: Only increases limits, doesn't decrease them
+apply_optimization_file_limits() {
+    local force_apply="${1:-false}"
+    
+    print_header "File Descriptor Limit Optimization"
+    
+    # Check current limits
+    local current_soft=$(ulimit -Sn)
+    local current_hard=$(ulimit -Hn)
+    
+    # Check if already optimized
+    if [[ $current_soft -ge 65536 ]]; then
+        print_info "File descriptor limits already optimized (current: $current_soft)"
+        return 0
+    fi
+    
+    # Check if we've already modified limits.conf
+    if grep -q "# MountAllS3 file descriptor limits" /etc/security/limits.conf 2>/dev/null; then
+        print_info "File descriptor limit configuration already applied"
+        print_warning "Current limit is still $current_soft - you may need to restart your session"
+        return 0
+    fi
+    
+    # Explain the optimization
+    echo "This optimization increases file descriptor limits for better s3fs performance."
+    echo "Changes:"
+    echo "  • Soft limit: 65536 file descriptors"
+    echo "  • Hard limit: 65536 file descriptors"
+    echo "  • Current soft limit: $current_soft"
+    echo "  • Current hard limit: $current_hard"
+    echo ""
+    echo "Benefits:"
+    echo "  • Prevents 'too many open files' errors with s3fs"
+    echo "  • Allows more concurrent S3 connections"
+    echo "  • Better performance with large directory structures"
+    echo ""
+    echo "ℹ️  This is a safe optimization that only increases limits (never decreases them)"
+    echo ""
+    
+    if [[ "$force_apply" != true ]]; then
+        if ! prompt_yes_no "Apply file descriptor limit optimizations?" "y"; then
+            print_info "Skipped file descriptor limit optimizations"
+            return 0
+        fi
+    fi
+    
+    # Apply the optimization
+    print_step "Applying file descriptor limit optimizations..."
+    
+    # Backup limits.conf
+    cp /etc/security/limits.conf "/etc/security/limits.conf.backup.$(date +%Y%m%d_%H%M%S)"
+    
+    # Add limits
+    cat >> /etc/security/limits.conf << 'EOF'
+
+# MountAllS3 file descriptor limits for s3fs performance
+* soft nofile 65536
+* hard nofile 65536
+EOF
+    
+    # Also set system-wide limit
+    if grep -q "fs.file-max" /etc/sysctl.conf; then
+        # Update existing
+        sed -i 's/^fs\.file-max.*/fs.file-max = 1000000/' /etc/sysctl.conf
+    else
+        echo "fs.file-max = 1000000" >> /etc/sysctl.conf
+    fi
+    
+    sysctl -p >/dev/null 2>&1
+    
+    print_success "File descriptor limit optimizations applied"
+    print_info "💡 Changes take effect for new login sessions"
+    print_info "   Current session limit is still $current_soft"
+}
+
+# Optimizes network buffer sizes for better S3 throughput  
+# Moderate risk: Changes network buffer sizes system-wide
+apply_optimization_network_buffers() {
+    local force_apply="${1:-false}"
+    
+    print_header "Network Buffer Optimization"
+    
+    # Check if already applied
+    if grep -q "# MountAllS3 network optimizations" /etc/sysctl.conf 2>/dev/null; then
+        print_info "Network buffer optimizations already applied"
+        return 0
+    fi
+    
+    # Check logs for network issues
+    local logs_show_issue=false
+    if check_logs_for_network_issues; then
+        logs_show_issue=true
+    fi
+    
+    # Explain the optimization
+    echo "This optimization increases network buffer sizes for better S3 throughput."
+    echo "Changes:"
+    echo "  • net.core.rmem_max=16777216 (16MB receive buffer)"
+    echo "  • net.core.wmem_max=16777216 (16MB send buffer)" 
+    echo "  • net.ipv4.tcp_rmem='4096 87380 16777216' (TCP receive window scaling)"
+    echo "  • net.ipv4.tcp_wmem='4096 65536 16777216' (TCP send window scaling)"
+    echo ""
+    echo "Benefits:"
+    echo "  • Higher throughput for large S3 transfers"
+    echo "  • Better handling of high-latency connections"
+    echo "  • Reduced TCP retransmissions"
+    echo ""
+    
+    if [[ "$logs_show_issue" == true ]]; then
+        echo "✅ Your logs show evidence of network issues that this could help resolve."
+    else
+        echo "ℹ️  No evidence of network issues in recent logs."
+        echo "   This optimization provides benefits mainly for high-throughput S3 workloads."
+    fi
+    echo ""
+    
+    if [[ "$force_apply" != true ]]; then
+        if ! prompt_yes_no "Apply network buffer optimizations?" "n"; then
+            print_info "Skipped network buffer optimizations"
+            return 0
+        fi
+    fi
+    
+    # Apply the optimization
+    print_step "Applying network buffer optimizations..."
+    
+    # Backup if not already done
+    if [[ ! -f "/etc/sysctl.conf.backup.$(date +%Y%m%d)" ]]; then
+        cp /etc/sysctl.conf "/etc/sysctl.conf.backup.$(date +%Y%m%d_%H%M%S)"
+    fi
+    
+    # Add network optimizations
+    cat >> /etc/sysctl.conf << 'EOF'
+
+# MountAllS3 network optimizations for S3 throughput
+net.core.rmem_max = 16777216
+net.core.wmem_max = 16777216
+net.ipv4.tcp_rmem = 4096 87380 16777216
+net.ipv4.tcp_wmem = 4096 65536 16777216
+EOF
+    
+    # Apply immediately
+    sysctl -p >/dev/null 2>&1
+    
+    print_success "Network buffer optimizations applied"
+}
+
+# Applies selected system-level optimizations for s3fs performance
+# Now provides individual optimization selection with safety checks
+apply_system_optimizations() {
+    print_header "System Performance Optimizations"
+    
+    echo "Available optimizations (safer options are recommended):"
+    echo ""
+    echo "1. 🟢 UpdateDB optimization (SAFE - recommended for all users)"
+    echo "   Prevents locate/updatedb from scanning s3fs mounts"
+    echo ""
+    echo "2. 🟢 File descriptor limits (SAFE - recommended for all users)"
+    echo "   Increases file descriptor limits to prevent 'too many open files' errors"
+    echo ""
+    echo "3. 🟡 Network buffer optimization (MODERATE - for high-throughput workloads)"
+    echo "   Increases network buffer sizes for better S3 transfer speeds"
+    echo ""
+    echo "ℹ️  More advanced optimizations are available via:"
+    echo "   sudo ./setup-system-advanced.sh"
+    echo ""
+    
+    local selected_opts=""
+    configure_value "selected_opts" \
+        "Enter comma-separated numbers (e.g., 1,2) for optimizations to apply. Each will ask for individual confirmation." \
+        "Which optimizations to apply?" \
+        "1,2" \
+        ""
+    
+    if [[ "$selected_opts" == "all" ]]; then
+        selected_opts="1,2,3"
+    fi
+    
+    local applied_any=false
+    IFS=',' read -ra opt_array <<< "$selected_opts"
+    for opt in "${opt_array[@]}"; do
+        case "${opt// /}" in
+            1) 
+                apply_optimization_updatedb
+                applied_any=true
+                ;;
+            2) 
+                apply_optimization_file_limits
+                applied_any=true
+                ;;
+            3) 
+                apply_optimization_network_buffers
+                applied_any=true
+                ;;
+            *) 
+                print_warning "Unknown optimization: $opt" 
+                ;;
+        esac
+        echo ""  # Add spacing between optimizations
+    done
+    
+    if [[ "$applied_any" == true ]]; then
+        print_success "System optimization configuration completed"
+        print_info "💡 Additional optimizations can be added in the future if performance issues arise"
+    else
+        print_info "No optimizations were applied"
+    fi
 }
 
 # Main interactive setup function for system integration

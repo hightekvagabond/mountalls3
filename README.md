@@ -81,10 +81,42 @@ aws configure --profile myprofile
 
 ## 📖 Usage
 
+### Quick Start
+
+**First time setup:**
+```bash
+./setup-mountalls3.sh  # Run the interactive setup wizard
+```
+
+**Daily usage:**
+```bash
+./mountalls3.sh         # Mount your default bucket groups
+./mountalls3.sh --unmount  # Unmount all when done
+```
+
+### Main Script Options
+
 For complete usage instructions, command line options, and examples:
 
 ```bash
 ./mountalls3.sh --help
+```
+
+**Common usage patterns:**
+```bash
+# Basic operations
+./mountalls3.sh                    # Mount default groups
+./mountalls3.sh -a                 # Mount all buckets from all profiles
+./mountalls3.sh -p myprofile       # Mount only buckets from 'myprofile'
+./mountalls3.sh -g websites,infra  # Mount specific bucket groups
+
+# Unmounting
+./mountalls3.sh --unmount          # Unmount all S3 buckets
+./mountalls3.sh -p work --unmount  # Unmount only 'work' profile buckets
+
+# Maintenance
+./mountalls3.sh --cleanup          # Clean up empty directories
+./mountalls3.sh --list-groups      # Show available bucket groups
 ```
 
 ## 🔄 Auto-Start Setup
@@ -164,7 +196,7 @@ Benefits:
 
 ## ⚙️ Configuration
 
-MountAllS3 uses a configuration file at `~/.config/mountalls3/config.yaml` to organize your S3 buckets into logical groups.
+MountAllS3 uses a configuration file at `~/.config/mountalls3/config.json` to organize your S3 buckets into logical groups.
 
 ### Initial Setup
 
@@ -176,30 +208,30 @@ Run the setup script to create your configuration:
 
 ### Configuration File Structure
 
-```yaml
-# Default settings
-defaults:
-  mount_groups: ["user-folders"]  # Groups to mount by default
-  mount_base: "~/s3"              # Default mount directory
-  aws_profile: "all"              # AWS profile to use
-
-# Bucket groups
-groups:
-  user-folders:
-    description: "Personal user folders and data"
-    buckets:
-      - profile: "personal"
-        bucket: "my-personal-files"
-      - profile: "work"
-        bucket: "user-documents"
-  
-  websites:
-    description: "Website assets and static files"
-    buckets:
-      - profile: "production"
-        bucket: "company-website-assets"
-      - profile: "personal"
-        bucket: "personal-blog-assets"
+```json
+{
+  "defaults": {
+    "mount_groups": ["user-folders"],
+    "mount_base": "~/s3",
+    "aws_profile": "all"
+  },
+  "groups": {
+    "user-folders": {
+      "description": "Personal user folders and data",
+      "buckets": [
+        {"profile": "personal", "bucket": "my-personal-files"},
+        {"profile": "work", "bucket": "user-documents"}
+      ]
+    },
+    "websites": {
+      "description": "Website assets and static files",
+      "buckets": [
+        {"profile": "production", "bucket": "company-website-assets"},
+        {"profile": "personal", "bucket": "personal-blog-assets"}
+      ]
+    }
+  }
+}
 ```
 
 ### Using Groups
@@ -233,17 +265,45 @@ This script includes several performance optimizations to minimize resource usag
 
 ### System Configuration
 
-The biggest performance issue with idle s3fs mounts comes from system utilities scanning mounted directories. The setup script handles this automatically:
+The biggest performance issue with idle s3fs mounts comes from system utilities scanning mounted directories. The setup script provides multiple levels of optimization:
 
+#### Safe Optimizations (Recommended for all users)
 ```bash
-sudo ./setup-mountalls3.sh
+sudo ./setup-system.sh --system
 ```
 
-This prevents tools like `mlocate`/`updatedb` from traversing s3fs directories, which can cause:
-- Thousands of unnecessary S3 API calls per minute
-- High memory usage (multiple GBs in some cases)
-- Network bandwidth consumption
-- Increased AWS costs
+This applies safe optimizations with log analysis and user consent:
+
+1. **🟢 UpdateDB Optimization (SAFE)** - Prevents `locate`/`updatedb` from scanning s3fs mounts
+   - Eliminates thousands of unnecessary S3 API calls per minute
+   - Reduces high memory usage (multiple GBs in some cases)
+   - Prevents network bandwidth consumption and increased AWS costs
+
+2. **🟢 File Descriptor Limits (SAFE)** - Increases limits to prevent "too many open files" errors
+   - Allows more concurrent S3 connections
+   - Better performance with large directory structures
+
+3. **🟡 Network Buffer Optimization (MODERATE)** - For high-throughput workloads
+   - Increases network buffer sizes for better S3 transfer speeds
+   - Beneficial for large file transfers
+
+#### Advanced Optimizations (For specific performance issues)
+```bash
+sudo ./setup-system-advanced.sh
+```
+
+For users experiencing specific performance problems, advanced optimizations are available:
+
+- **🟡 Kernel VM Parameters** - Adjusts memory management for network filesystems
+- **🟡 I/O Scheduler** - Optimizes SSD scheduler for s3fs cache performance  
+- **🔴 Memory Management** - Advanced memory tuning for large cache workloads (8GB+ RAM)
+
+**Each optimization:**
+- ✅ Checks system logs for evidence of the specific issue it solves
+- ✅ Explains what the change does and potential risks
+- ✅ Asks for explicit user consent before applying
+- ✅ Creates backup files before making changes
+- ✅ Can be applied individually or in combination
 
 ### Monitoring Performance
 
