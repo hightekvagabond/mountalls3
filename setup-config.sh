@@ -15,7 +15,7 @@
 # =============================================================================
 
 # Load common functions
-COMMON_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+COMMON_SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 source "$COMMON_SCRIPT_DIR/common.sh" || {
     echo "❌ Error: Could not load common.sh library"
     exit 1

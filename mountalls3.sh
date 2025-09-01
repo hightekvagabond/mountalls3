@@ -30,7 +30,8 @@
 # =============================================================================
 
 # Source common functions and config handling
-COMMON_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Resolve symlinks to find the actual script location
+COMMON_SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 source "$COMMON_SCRIPT_DIR/common.sh"
 
 # =============================================================================
@@ -537,10 +538,7 @@ main() {
     echo "To unmount all S3 buckets, run:"
     echo "  $0 --unmount"
     echo ""
-    echo "PERFORMANCE TIPS:"
-    echo "• To prevent system utilities from scanning s3fs mounts,"
-    echo "  add 'fuse.s3fs' to PRUNEFS in /etc/updatedb.conf"
-    echo "• To clean up 'df' output, add this alias to ~/.bashrc:"
+    echo "To clean up 'df' output, add this alias to ~/.bashrc:"
     echo "  alias df='command df \"\$@\" | grep -v \"^s3fs\"'"
     echo "==================================="
     

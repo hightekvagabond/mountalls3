@@ -17,7 +17,7 @@
 # =============================================================================
 
 # Load common functions
-COMMON_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+COMMON_SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 source "$COMMON_SCRIPT_DIR/common.sh" || {
     echo "❌ Error: Could not load common.sh library"
     exit 1
@@ -179,16 +179,16 @@ create_symlinks() {
     fi
     
     # Create symlink for main script only
-    # (setup script can be accessed via: mountalls3 --setup)
+    # (setup script can be accessed via: mountalls3.sh --setup)
     local mountalls3_script="$COMMON_SCRIPT_DIR/mountalls3.sh"
     
     if [[ -f "$mountalls3_script" ]]; then
-        ln -sf "$mountalls3_script" "$target_dir/mountalls3" || {
-            print_error "Failed to create symlink for mountalls3"
+        ln -sf "$mountalls3_script" "$target_dir/mountalls3.sh" || {
+            print_error "Failed to create symlink for mountalls3.sh"
             return 1
         }
-        print_success "Created symlink: $target_dir/mountalls3 -> $mountalls3_script"
-        print_info "💡 Access setup via: mountalls3 --setup"
+        print_success "Created symlink: $target_dir/mountalls3.sh -> $mountalls3_script"
+        print_info "💡 Access setup via: mountalls3.sh --setup"
     else
         print_error "Main script not found: $mountalls3_script"
         return 1
