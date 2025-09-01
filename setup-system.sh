@@ -291,28 +291,44 @@ check_logs_for_s3fs_issues() {
         "out of memory.*s3fs"
     )
     
-    debug_debug "Checking system logs for s3fs performance issues..."
+    echo "🔍 Analyzing system logs for s3fs issues..."
     
     # Check available log files
     for log_file in "${log_files[@]}"; do
         if [[ -r "$log_file" ]]; then
+            echo -n "   Checking $(basename "$log_file")... "
+            local found_in_file=0
             for pattern in "${issue_patterns[@]}"; do
                 if grep -i "$pattern" "$log_file" >/dev/null 2>&1; then
                     echo "Found s3fs issue pattern '$pattern' in $log_file" >> "$temp_log"
                     issues_found=1
+                    found_in_file=1
                 fi
             done
+            if [[ $found_in_file -eq 1 ]]; then
+                echo "⚠️  issues found"
+            else
+                echo "✅ clean"
+            fi
         fi
     done
     
     # Check systemd journal if available
     if command -v journalctl >/dev/null 2>&1; then
+        echo -n "   Checking systemd journal (last 7 days)... "
+        local found_in_journal=0
         for pattern in "${issue_patterns[@]}"; do
             if journalctl --since "7 days ago" | grep -i "$pattern" >/dev/null 2>&1; then
                 echo "Found s3fs issue pattern '$pattern' in systemd journal" >> "$temp_log"
                 issues_found=1
+                found_in_journal=1
             fi
         done
+        if [[ $found_in_journal -eq 1 ]]; then
+            echo "⚠️  issues found"
+        else
+            echo "✅ clean"
+        fi
     fi
     
     if [[ $issues_found -eq 1 && -f "$temp_log" ]]; then
@@ -343,16 +359,20 @@ check_logs_for_network_issues() {
         "tcp.*congestion"
     )
     
-    debug_debug "Checking logs for network performance issues..."
+    echo "🔍 Analyzing logs for network performance issues..."
     
     for log_file in "${log_files[@]}"; do
         if [[ -r "$log_file" ]]; then
+            echo -n "   Checking $(basename "$log_file") for recent issues... "
+            local found_recent=0
             for pattern in "${network_patterns[@]}"; do
                 if grep -i "$pattern" "$log_file" | tail -20 | grep -q "$(date +%Y-%m-%d)"; then
+                    echo "⚠️  recent network issues found"
                     debug_debug "Found recent network issue: $pattern in $log_file"
                     return 0
                 fi
             done
+            echo "✅ clean"
         fi
     done
     
@@ -369,15 +389,20 @@ check_logs_for_io_issues() {
         "disk.*timeout"
     )
     
-    debug_debug "Checking logs for I/O performance issues..."
+    echo "🔍 Analyzing logs for I/O performance issues..."
     
     if command -v journalctl >/dev/null 2>&1; then
+        echo -n "   Checking systemd journal for I/O issues (last 7 days)... "
         for pattern in "${io_patterns[@]}"; do
             if journalctl --since "7 days ago" | grep -i "$pattern" | grep -q fuse; then
+                echo "⚠️  I/O issues found"
                 debug_debug "Found I/O issue related to fuse: $pattern"
                 return 0
             fi
         done
+        echo "✅ clean"
+    else
+        echo "   systemd journal not available"
     fi
     
     return 1
