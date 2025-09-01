@@ -567,6 +567,241 @@ require_command() {
 }
 
 # =============================================================================
+# COMMON FLAG PARSING SYSTEM
+# =============================================================================
+
+# Flag definition structure:
+# FLAG_DEFINITIONS["flag_name"]="function_name|param_type|default_value|help_text|prompt_text|prompt_help"
+# 
+# param_type: "none", "required", "optional", "choice:option1,option2,option3", "yesno"
+# function_name: function to call when flag is encountered
+# default_value: default value for the parameter
+# help_text: text shown in --help output
+# prompt_text: question asked in interactive mode
+# prompt_help: explanatory text shown before prompt
+
+declare -A FLAG_DEFINITIONS
+declare -A FLAG_VALUES
+declare -A FLAG_ORDER
+
+# Register a flag definition
+register_flag() {
+    local flag="$1"
+    local function_name="$2"
+    local param_type="$3"
+    local default_value="$4"
+    local help_text="$5"
+    local prompt_text="$6"
+    local prompt_help="$7"
+    
+    FLAG_DEFINITIONS["$flag"]="${function_name}|${param_type}|${default_value}|${help_text}|${prompt_text}|${prompt_help}"
+    
+    # Track order of registration for help display
+    local order=${#FLAG_ORDER[@]}
+    FLAG_ORDER["$flag"]=$order
+}
+
+# Parse command line arguments using registered flags
+parse_flags() {
+    local script_name="$1"
+    shift
+    
+    # Handle help first
+    for arg in "$@"; do
+        if [[ "$arg" == "-h" || "$arg" == "--help" ]]; then
+            show_dynamic_help "$script_name"
+            exit 0
+        fi
+    done
+    
+    # Parse other flags
+    while [[ $# -gt 0 ]]; do
+        local flag="$1"
+        local flag_clean="${flag#--}"  # Remove -- prefix
+        
+        if [[ -n "${FLAG_DEFINITIONS[$flag_clean]:-}" ]]; then
+            IFS='|' read -r function_name param_type default_value help_text prompt_text prompt_help <<< "${FLAG_DEFINITIONS[$flag_clean]}"
+            
+            case "$param_type" in
+                "none")
+                    FLAG_VALUES["$flag_clean"]="true"
+                    shift
+                    ;;
+                "required")
+                    if [[ $# -lt 2 || "$2" == --* ]]; then
+                        print_error "Flag $flag requires a parameter"
+                        exit 1
+                    fi
+                    FLAG_VALUES["$flag_clean"]="$2"
+                    shift 2
+                    ;;
+                "optional")
+                    if [[ $# -gt 1 && "$2" != --* ]]; then
+                        FLAG_VALUES["$flag_clean"]="$2"
+                        shift 2
+                    else
+                        FLAG_VALUES["$flag_clean"]="$default_value"
+                        shift
+                    fi
+                    ;;
+                "yesno")
+                    if [[ $# -gt 1 && "$2" =~ ^[yn]$ ]]; then
+                        FLAG_VALUES["$flag_clean"]="$2"
+                        shift 2
+                    else
+                        FLAG_VALUES["$flag_clean"]="$default_value"
+                        shift
+                    fi
+                    ;;
+                choice:*)
+                    local choices="${param_type#choice:}"
+                    if [[ $# -gt 1 && "$2" != --* ]]; then
+                        if [[ ",$choices," == *",$2,"* ]]; then
+                            FLAG_VALUES["$flag_clean"]="$2"
+                            shift 2
+                        else
+                            print_error "Flag $flag must be one of: $choices"
+                            exit 1
+                        fi
+                    else
+                        FLAG_VALUES["$flag_clean"]="$default_value"
+                        shift
+                    fi
+                    ;;
+            esac
+        elif [[ "$flag" == "" ]]; then
+            # No arguments - run interactive mode
+            FLAG_VALUES["interactive"]="true"
+            break
+        else
+            print_error "Unknown flag: $flag"
+            show_dynamic_help "$script_name"
+            exit 1
+        fi
+    done
+    
+    # If no flags provided, default to interactive
+    if [[ ${#FLAG_VALUES[@]} -eq 0 ]]; then
+        FLAG_VALUES["interactive"]="true"
+    fi
+}
+
+# Execute functions based on parsed flags
+execute_flags() {
+    # Sort flags by registration order for consistent execution
+    local -a sorted_flags=()
+    for flag in "${!FLAG_ORDER[@]}"; do
+        sorted_flags[${FLAG_ORDER[$flag]}]="$flag"
+    done
+    
+    # Execute flag functions
+    for flag in "${sorted_flags[@]}"; do
+        if [[ -n "${FLAG_VALUES[$flag]:-}" && "$flag" != "interactive" ]]; then
+            IFS='|' read -r function_name param_type default_value help_text prompt_text prompt_help <<< "${FLAG_DEFINITIONS[$flag]}"
+            
+            if [[ "$param_type" == "none" ]]; then
+                "$function_name"
+            else
+                "$function_name" "${FLAG_VALUES[$flag]}"
+            fi
+        fi
+    done
+    
+    # Run interactive mode if specified
+    if [[ "${FLAG_VALUES[interactive]:-}" == "true" ]]; then
+        if declare -f interactive_setup >/dev/null; then
+            interactive_setup
+        else
+            print_error "Interactive mode not implemented"
+            exit 1
+        fi
+    fi
+}
+
+# Generate dynamic help from flag definitions
+show_dynamic_help() {
+    local script_name="$1"
+    local script_description="${SCRIPT_DESCRIPTION:-}"
+    
+    echo "${script_name^} - ${script_description}"
+    echo ""
+    echo "Usage: $0 [OPTIONS]"
+    echo ""
+    
+    # Group flags by category if available
+    local -A categories
+    local -a sorted_flags=()
+    
+    # Sort flags by registration order
+    for flag in "${!FLAG_ORDER[@]}"; do
+        sorted_flags[${FLAG_ORDER[$flag]}]="$flag"
+    done
+    
+    echo "OPTIONS:"
+    for flag in "${sorted_flags[@]}"; do
+        if [[ -n "${FLAG_DEFINITIONS[$flag]:-}" ]]; then
+            IFS='|' read -r function_name param_type default_value help_text prompt_text prompt_help <<< "${FLAG_DEFINITIONS[$flag]}"
+            
+            local flag_display="--$flag"
+            case "$param_type" in
+                "required") flag_display="--$flag VALUE" ;;
+                "optional") flag_display="--$flag [VALUE]" ;;
+                "yesno") flag_display="--$flag [y/n]" ;;
+                choice:*) 
+                    local choices="${param_type#choice:}"
+                    flag_display="--$flag [$choices]"
+                    ;;
+            esac
+            
+            printf "  %-25s %s\n" "$flag_display" "$help_text"
+            if [[ -n "$default_value" && "$default_value" != "true" ]]; then
+                printf "  %-25s %s\n" "" "(default: $default_value)"
+            fi
+        fi
+    done
+    
+    echo ""
+    echo "  -h, --help               Show this help message"
+    echo ""
+    echo "If no options are provided, interactive mode will start."
+}
+
+# Run interactive prompts for unset flags
+run_interactive_prompts() {
+    local -a sorted_flags=()
+    
+    # Sort flags by registration order
+    for flag in "${!FLAG_ORDER[@]}"; do
+        sorted_flags[${FLAG_ORDER[$flag]}]="$flag"
+    done
+    
+    for flag in "${sorted_flags[@]}"; do
+        if [[ -n "${FLAG_DEFINITIONS[$flag]:-}" && -z "${FLAG_VALUES[$flag]:-}" ]]; then
+            IFS='|' read -r function_name param_type default_value help_text prompt_text prompt_help <<< "${FLAG_DEFINITIONS[$flag]}"
+            
+            if [[ "$param_type" != "none" && -n "$prompt_text" ]]; then
+                local var_name="flag_${flag//-/_}"
+                
+                case "$param_type" in
+                    "yesno")
+                        configure_value "$var_name" "$prompt_help" "$prompt_text" "$default_value" "y,n"
+                        ;;
+                    choice:*)
+                        local choices="${param_type#choice:}"
+                        configure_value "$var_name" "$prompt_help" "$prompt_text" "$default_value" "$choices"
+                        ;;
+                    *)
+                        configure_value "$var_name" "$prompt_help" "$prompt_text" "$default_value"
+                        ;;
+                esac
+                
+                FLAG_VALUES["$flag"]="${!var_name}"
+            fi
+        fi
+    done
+}
+
+# =============================================================================
 # INITIALIZATION
 # =============================================================================
 

@@ -122,6 +122,46 @@ MountAllS3 automatically cleans up empty unmounted directories after each run to
 
 Use `./mountalls3.sh --cleanup` for manual cleanup or see `--help` for details.
 
+## 🏗️ Modular Architecture
+
+MountAllS3 uses a sophisticated modular design with data-driven configuration:
+
+### **Setup Modules:**
+- **`setup-mountalls3.sh`** - Main orchestrator that routes to specialized modules
+- **`setup-config.sh`** - Basic configuration (mount location, AWS profiles, defaults)
+- **`setup-groups.sh`** - Bucket group management and bucket assignment
+- **`setup-system.sh`** - System integration (autostart, symlinks, optimizations)
+- **`common.sh`** - Shared library with smart flag parsing and utilities
+
+### **Data-Driven Flag System:**
+Each setup module defines its flags in a declarative data structure:
+
+```bash
+register_flag "mount-location" "configure_mount_location" "optional" "~/s3" \
+    "Configure mount base directory" \
+    "What would you like your mount directory to be?" \
+    "S3 buckets will be mounted as subdirectories under this location..."
+```
+
+Benefits:
+- **Zero code duplication** - Common flag parsing for all modules
+- **Consistent UX** - Identical help format and behavior across scripts
+- **Self-documenting** - Help text automatically generated from definitions
+- **Type-safe** - Built-in parameter validation and handling
+- **Interactive integration** - Automatic prompts for missing values
+
+### **Usage Patterns:**
+```bash
+# Non-interactive (automation-friendly)
+./setup-config.sh --mount-location ~/my-s3 --profiles
+
+# Interactive (user-friendly prompts)
+./setup-config.sh --mount-location
+
+# Help (dynamically generated)
+./setup-config.sh --help
+```
+
 ## ⚙️ Configuration
 
 MountAllS3 uses a configuration file at `~/.config/mountalls3/config.yaml` to organize your S3 buckets into logical groups.

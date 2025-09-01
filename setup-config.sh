@@ -3,18 +3,6 @@
 # =============================================================================
 # MountAllS3 Basic Configuration Setup
 # =============================================================================
-#
-# DESCRIPTION:
-#   Handles basic configuration setup including mount location, 
-#   AWS profiles, and default mount groups.
-#
-# FEATURES:
-#   - Interactive mount location selection
-#   - AWS profile discovery and selection
-#   - Default group configuration
-#   - Configuration validation and reset
-#
-# =============================================================================
 
 # Load common functions
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -22,6 +10,54 @@ source "$SCRIPT_DIR/common.sh" || {
     echo "❌ Error: Could not load common.sh library"
     exit 1
 }
+
+# Script metadata
+SCRIPT_DESCRIPTION="Configure basic MountAllS3 settings"
+
+# =============================================================================
+# FLAG DEFINITIONS
+# =============================================================================
+
+# Clear any existing flag definitions
+unset FLAG_DEFINITIONS FLAG_VALUES FLAG_ORDER
+declare -A FLAG_DEFINITIONS FLAG_VALUES FLAG_ORDER
+
+# Register all flags for this script
+# Format: register_flag "flag" "function" "param_type" "default" "help_text" "prompt_text" "prompt_help"
+
+register_flag "mount-location" "configure_mount_location" "optional" "~/s3" \
+    "Configure mount base directory" \
+    "What would you like your mount directory to be?" \
+    "S3 buckets will be mounted as subdirectories under this location. Each bucket becomes a folder you can browse like any other directory."
+
+register_flag "profiles" "configure_aws_profiles" "none" "" \
+    "Configure AWS profiles" \
+    "Use all available AWS profiles?" \
+    "You can use all your AWS profiles or select specific ones later when creating bucket groups."
+
+register_flag "defaults" "configure_defaults" "none" "" \
+    "Configure default mount groups" \
+    "" \
+    ""
+
+register_flag "validate" "validate_config_file" "none" "" \
+    "Validate current configuration" \
+    "" \
+    ""
+
+register_flag "reset" "reset_config" "none" "" \
+    "Reset configuration (with confirmation)" \
+    "" \
+    ""
+
+register_flag "interactive" "interactive_setup" "none" "" \
+    "Run interactive basic setup" \
+    "" \
+    ""
+
+# =============================================================================
+# CONFIGURATION FUNCTIONS
+# =============================================================================
 
 configure_mount_location() {
     local specified_path="$1"
@@ -31,15 +67,12 @@ configure_mount_location() {
     # Set the variable if provided via flag
     local mount_base="$specified_path"
     
-    # Get default value
-    local default_mount
-    default_mount=$(get_default_mount_base)
-    
-    # Use smart configuration function
-    configure_value "mount_base" \
-        "S3 buckets will be mounted as subdirectories under this location. Each bucket becomes a folder you can browse like any other directory." \
-        "What would you like your mount directory to be?" \
-        "$default_mount"
+    # Get default value if not provided
+    if [[ -z "$mount_base" ]]; then
+        local default_mount
+        default_mount=$(get_default_mount_base)
+        mount_base="$default_mount"
+    fi
     
     # Expand and validate path
     mount_base=$(expand_path "$mount_base")
@@ -150,6 +183,10 @@ configure_defaults() {
     fi
 }
 
+# =============================================================================
+# CONFIG FILE MANAGEMENT
+# =============================================================================
+
 update_config_value() {
     local key="$1"
     local value="$2"
@@ -253,73 +290,32 @@ reset_config() {
 interactive_setup() {
     print_header "Basic Configuration Setup"
     
-    # Step 1: Mount location
-    configure_mount_location || return 1
+    # Run interactive prompts for all unset flags
+    run_interactive_prompts
     
-    # Step 2: AWS profiles
-    configure_aws_profiles || return 1
+    # Execute the functions with the collected values
+    if [[ -n "${FLAG_VALUES[mount-location]:-}" ]]; then
+        configure_mount_location "${FLAG_VALUES[mount-location]}"
+    fi
+    
+    if [[ -n "${FLAG_VALUES[profiles]:-}" ]]; then
+        configure_aws_profiles
+    fi
     
     print_success "Basic configuration completed"
     print_info "Next: Configure bucket groups with './setup-mountalls3.sh --groups'"
 }
 
-show_usage() {
-    echo "MountAllS3 Basic Configuration Setup"
-    echo ""
-    echo "Usage: $0 [OPTIONS]"
-    echo ""
-    echo "CONFIGURATION OPTIONS:"
-    echo "  --mount-location [PATH]    Configure mount base directory (interactive if no path)"
-    echo "  --profiles                 Configure AWS profiles"
-    echo "  --defaults                 Configure default mount groups"
-    echo "  --interactive              Run interactive basic setup"
-    echo ""
-    echo "UTILITIES:"
-    echo "  --validate                 Validate current configuration"
-    echo "  --reset                    Reset configuration (with confirmation)"
-    echo ""
-    echo "HELP:"
-    echo "  --help, -h                 Show this help message"
-    echo ""
-    echo "EXAMPLES:"
-    echo "  $0 --mount-location ~/my-s3    # Set mount location non-interactively"
-    echo "  $0 --mount-location            # Set mount location interactively"
-}
+# =============================================================================
+# MAIN EXECUTION
+# =============================================================================
 
 main() {
-    case "${1:-}" in
-        --help|-h)
-            show_usage
-            ;;
-        --mount-location)
-            shift
-            configure_mount_location "$1"
-            ;;
-        --profiles)
-            configure_aws_profiles
-            ;;
-        --defaults)
-            configure_defaults
-            ;;
-        --interactive)
-            interactive_setup
-            ;;
-        --validate)
-            validate_config_file
-            ;;
-        --reset)
-            reset_config
-            ;;
-        "")
-            # Default action
-            interactive_setup
-            ;;
-        *)
-            print_error "Unknown option: $1"
-            show_usage
-            exit 1
-            ;;
-    esac
+    # Parse flags using the common system
+    parse_flags "setup-config" "$@"
+    
+    # Execute the parsed flags
+    execute_flags
 }
 
 main "$@"
